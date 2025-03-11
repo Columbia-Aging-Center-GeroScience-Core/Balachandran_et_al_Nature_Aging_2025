@@ -1,0 +1,2225 @@
+---
+title: "HRS_Analysis"
+author: "HemingPei"
+date: "2025-03-11"
+output: html_document
+---
+# Regression
+```{r include=FALSE,warning=FALSE}
+### Health outcome data
+outcome_2020 <- read_dta("C:/Users/pku/Desktop/HRSPoA/Data/HRSRAND_Health2020_DWB(1).dta")
+HRSPoA_Survival <- read_dta("C:/Users/pku/Desktop/HRSPoA/Data/HRSPoA_Survival.dta")
+# generate outcome variables and covariates
+smoking_long = outcome_2020 %>% select(hhidpn, raedyrs, ends_with(c("8", "9", "10", "11", "12", "13", "14","15"))) %>% select(hhidpn, raedyrs, starts_with("smoker")) %>% pivot_longer(starts_with("smoker"), names_to = c(".value", "year_baseline"), names_pattern = "(......)(\\d+)") 
+
+chrondxe_long = outcome_2020 %>% select(hhidpn, raedyrs, ends_with(c("8", "9", "10", "11", "12", "13", "14","15"))) %>% select(hhidpn, raedyrs, starts_with("chrondxe"), -contains("w")) %>% pivot_longer(starts_with("chrondxe"), names_to = c(".value", "year_baseline"), names_pattern = "(........)(\\d+)") 
+
+adl_long = outcome_2020 %>% 
+  dplyr::rename(adl8 = adl5a8, adl9 = adl5a9, adl10 = adl5a10, adl11 = adl5a11, adl12 = adl5a12, adl13 = adl5a13, adl14 = adl5a14, adl15 = adl5a15) %>% 
+  select(hhidpn, raedyrs, ends_with(c("l8", "l9", "l10", "l11", "l12", "l13", "l14","l15"))) %>% select(hhidpn, raedyrs, starts_with("adl")) %>% pivot_longer(starts_with("adl"), names_to = c(".value", "year_baseline"), names_pattern = "(...)(\\d+)") 
+
+iadl_long = outcome_2020 %>%  
+  dplyr::rename(iadl8 = iadl5a8, iadl9 = iadl5a9, iadl10 = iadl5a10, iadl11 = iadl5a11, iadl12 = iadl5a12, iadl13 = iadl5a13, iadl14 = iadl5a14, iadl15 = iadl5a15) %>% select(hhidpn, raedyrs, ends_with(c("l8", "l9", "l10", "l11", "l12", "l13", "l14","l15"))) %>% select(hhidpn, raedyrs, starts_with("iadl")) %>% pivot_longer(starts_with("iadl"), names_to = c(".value", "year_baseline"), names_pattern = "(....)(\\d+)") 
+
+bmi_long = outcome_2020 %>% select(hhidpn, raedyrs, ends_with(c("8", "9", "10", "11", "12", "13", "14","15"))) %>% select(hhidpn, raedyrs, starts_with("bmi")) %>% pivot_longer(starts_with("bmi"), names_to = c(".value", "year_baseline"), names_pattern = "(...)(\\d+)") 
+
+baseline = smoking_long %>% full_join(chrondxe_long) %>% full_join(adl_long) %>% full_join(iadl_long) %>% full_join(bmi_long) %>% 
+  mutate(year_baseline = case_when(year_baseline == 8 ~ 2006,
+                                   year_baseline == 9 ~ 2008, 
+                                   year_baseline == 10 ~ 2010, 
+                                   year_baseline == 11 ~ 2012, 
+                                   year_baseline == 12 ~ 2014, 
+                                   year_baseline == 13 ~ 2016,
+                                   year_baseline == 14 ~ 2018,
+                                   year_baseline == 15 ~ 2020 ))
+
+outcome_2020_data = chrondxe_long %>% mutate(year_baseline = as.numeric(year_baseline)) %>%
+  filter(year_baseline >= 13) %>% group_by(hhidpn) %>% filter(any(complete.cases(chrondxe))) %>%
+  mutate(chronic_total = max(chrondxe, na.rm=T),chronic_end = max(year_baseline)) %>%
+  filter(year_baseline == chronic_end) %>% ungroup() %>% 
+  mutate(chronic_total = if_else(chronic_total > 3, 3, chronic_total)) %>% 
+  select(hhidpn, chronic_total,chronic_end) %>% 
+  full_join(adl_long %>% mutate(year_baseline = as.numeric(year_baseline)) %>%
+               filter(year_baseline >= 13) %>% group_by(hhidpn) %>%
+              filter(any(complete.cases(adl))) %>% 
+              mutate(adl_total = max(adl, na.rm=T),adl_end = max(year_baseline)) %>%
+              filter(year_baseline == adl_end) %>% ungroup() %>% 
+              mutate(adl_total = if_else(adl_total > 3, 3, adl_total)) %>% 
+              select(hhidpn, adl_total,adl_end) ) %>% 
+  full_join(iadl_long %>% mutate(year_baseline = as.numeric(year_baseline)) %>%
+               filter(year_baseline >= 13) %>% group_by(hhidpn) %>%
+               filter(any(complete.cases(iadl))) %>% 
+               mutate(iadl_total = max(iadl, na.rm=T),iadl_end = max(year_baseline)) %>%
+               filter(year_baseline == iadl_end) %>% ungroup() %>%
+               mutate(iadl_total = if_else(iadl_total > 3, 3, iadl_total)) %>%
+               select(hhidpn, iadl_total,iadl_end) )
+
+outcome_slope = slopes %>% mutate(hhidpn = id, hhidpn = as.numeric(hhidpn)) %>%
+  left_join(baseline) %>% dplyr::rename(chronic = chrondxe) %>%
+  left_join(outcome_2020_data,by="hhidpn") %>% 
+  mutate(three_time_point = if_else(hhidpn %in% 
+                                      as.character(as.numeric(plot_data$id)), 1, 0)) %>% 
+  mutate(more_than_65 = if_else(age >= 65, 1, 0)) %>% mutate(sex = if_else(sex=="Male", 1, 0))
+
+data_surv <- data1 %>% 
+   mutate(three_time_point = if_else(hhidpn %in% 
+                                       as.character(as.numeric(plot_data$id)), 1, 0)) %>%
+  filter(year==year_baseline)%>%
+  left_join(HRSPoA_Survival, by="hhidpn") %>%
+  mutate(time = survtime_poa,death=dead) %>% 
+  select(hhidpn,time,death,three_time_point,raedyrs)
+
+slopes$id <- as.character(slopes$id)
+data_surv$id <- as.character(data_surv$hhidpn)
+
+adj_outcome_slope <- outcome_slope %>% select(id, bmi,smoker)
+adj_outcome_slope$id <- as.character(adj_outcome_slope$id)
+
+data_surv <- data_surv %>% left_join(adj_outcome_slope, by ="id") %>% 
+  mutate(more_than_65 = if_else(age >= 65, 1, 0)) %>% 
+  mutate(sex = if_else(sex=="Male", 1, 0))
+
+```
+
+```{r}
+# cognitive function data
+cog_outcome <- read_sas("C:/Users/pku/Desktop/HRSPoA/Data/cogfinalimp_9520wide.sas7bdat", NULL)
+cog_outcome <- cog_outcome %>% 
+  mutate( hhidpn = paste0(HHID, PN), hhidpn = as.numeric(hhidpn)) %>% 
+  select(cogtot27_imp2006,cogtot27_imp2008,cogtot27_imp2010,cogtot27_imp2012,
+         cogtot27_imp2014,cogtot27_imp2016,cogtot27_imp2018,cogtot27_imp2020,
+         cogfunction2006,cogfunction2008,cogfunction2010,cogfunction2012,
+         cogfunction2014,cogfunction2016,cogfunction2018,cogfunction2020,hhidpn)
+
+outcome_slope <- outcome_slope %>% left_join(cog_outcome,by="hhidpn") %>% 
+       mutate(cog_time = case_when(!is.na(cogtot27_imp2020) ~ 2020 - year_baseline,
+                                   !is.na(cogtot27_imp2018) ~ 2018 - year_baseline,
+                                   !is.na(cogtot27_imp2016) ~ 2016 - year_baseline),
+              cog_time = case_when(three_time_point == 0 ~ cog_time - 4,
+                                   three_time_point == 1 ~ cog_time - 8),
+              cog_time = replace(cog_time, cog_time == 0, NA),
+              cogtot27 = case_when(year_baseline == 2006 ~ cogtot27_imp2006,
+                                   year_baseline == 2008 ~ cogtot27_imp2008, 
+                                   year_baseline == 2010 ~ cogtot27_imp2010, 
+                                   year_baseline == 2012 ~ cogtot27_imp2012 ),
+              cogfunction = case_when(year_baseline == 2006 ~ cogfunction2006,
+                                      year_baseline == 2008 ~ cogfunction2008, 
+                                      year_baseline == 2010 ~ cogfunction2010, 
+                                      year_baseline == 2012 ~ cogfunction2012 ),
+              cogtot27_final = case_when(is.na(cog_time) ~ NA,
+                                  !is.na(cogtot27_imp2020) ~ cogtot27_imp2020,
+                                   is.na(cogtot27_imp2020) & !is.na(cogtot27_imp2018) ~ cogtot27_imp2018,
+                                   is.na(cogtot27_imp2020) & is.na(cogtot27_imp2018) & 
+                                   !is.na(cogtot27_imp2016) ~ cogtot27_imp2016 ),
+              cogfunction_final = case_when(is.na(cog_time) ~ NA,
+                                  !is.na(cogfunction2020) ~ cogfunction2020,
+                                   is.na(cogfunction2020) & !is.na(cogfunction2018) ~ cogfunction2018,
+                                   is.na(cogfunction2020) & is.na(cogfunction2018) & 
+                                   !is.na(cogfunction2016) ~ cogfunction2016),
+              cogfunction = cogfunction-1, cogfunction_final = cogfunction_final-1,
+             cogfunction = factor(cogfunction, levels = c(0, 1, 2)), 
+             cogfunction_final = factor(cogfunction_final, levels = c(0, 1, 2)) )
+
+outcome_slope <- outcome_slope %>% 
+                      mutate(time = case_when(
+                                      year_baseline == 2006 & three_time_point == 0 ~ 10,
+                                      year_baseline == 2006 & three_time_point == 1 ~ 6,
+                                      year_baseline == 2008 & three_time_point == 0 ~ 8,
+                                      year_baseline == 2008 & three_time_point == 1 ~ 4,
+                                      year_baseline == 2010 ~ 6,year_baseline == 2012 ~ 4 ) )
+
+check1 <- outcome_slope %>% filter(!is.na(cog_time) )
+table(check1$cogfunction)
+length(check1$id)
+
+```
+
+```{r}
+#### Sample descriptive table (Supplemental table 1 A)
+outcome_slope %>% group_by(year_baseline) %>%
+  summarise(
+    n=length(id),
+    threetime = sum(three_time_point),
+    age_m=mean(age),
+    age_sd=sd(age),
+    male=sum(sex==1)/n()*100 )
+
+# Cohen's D table (Supplemental table 6 B)
+library(sjPlot)
+outcome_slope <- outcome_slope %>% mutate(smoker=as.factor(smoker)) %>%
+ mutate(bmi_cat = case_when(bmi < 25 ~ "normal",
+                            bmi >= 25 & bmi <= 30 ~ "overweight",
+                            bmi > 30 ~ "obese")) 
+
+model_dis1 <- lm(composite_scaled ~ age_baseline + I(age_baseline^2) + 
+                   year_baseline + sex, data = outcome_slope)
+model_dis2 <- lm(composite_scaled ~ age_baseline + I(age_baseline^2) + 
+                   year_baseline + sex + edu, data = outcome_slope)
+model_dis3 <- lm(composite_scaled ~ age_baseline + I(age_baseline^2) + 
+                   year_baseline + sex + edu + smoker, data = outcome_slope)
+model_dis4 <- lm(composite_scaled ~ age_baseline + I(age_baseline^2) + 
+                   year_baseline + sex + edu + smoker + bmi_cat, data = outcome_slope)
+
+tab_model(model_dis1, model_dis2, model_dis3 , model_dis4, 
+          dv.labels = c("Base Model","EDUCATION COVARIATE","SMOKING COVARIATE",
+                        "BMI COVARIATE"), title = "Cohen's D", 
+          file = "C:/Users/pku/Desktop/Supp_tab_6_B_0210HP.doc")
+
+```
+ 
+```{r}
+# KM Plot
+km_curv_data1 = data_surv %>% 
+  mutate(composite_scaled = residuals(lm(scale(composite_scaled) ~ age_baseline + 
+                                           I(age_baseline^2) + sex + base_2008 + 
+                                           base_2010 + base_2012 + more_than_65, 
+                                         data = data_surv)),
+         composite_scaled = as.numeric(scale(composite_scaled)),
+         compsite_cat = case_when(composite_scaled > quantile(composite_scaled,0.75) ~ ">75%",
+                                  composite_scaled > quantile(composite_scaled,0.5) & 
+                                  composite_scaled < quantile(composite_scaled,0.75) ~ "50%-75%",
+                                  composite_scaled > quantile(composite_scaled,0.25) & 
+                                  composite_scaled < quantile(composite_scaled,0.5) ~ "25%-50%",
+                                  composite_scaled < quantile(composite_scaled,0.25) ~ "<25%"))
+
+kmfit1 <- survfit(Surv(time, death) ~ compsite_cat,
+                  data = km_curv_data1)
+
+ggsurvplot(kmfit1, data = km_curv_data1, risk.table = TRUE, 
+           risk.table.col = "strata", 
+           size = 1, palette = c( "#2166AC", "#B2182B", "#92C5DE", "#F4A582" ),
+           risk.table.height = 0.25, 
+           ggtheme = theme_bw(),
+           conf.int = TRUE, 
+           ylim = c(0.5, 1),
+           xlim = c(0, 16),test.for.trend=TRUE,break.time.by=4)
+
+```
+
+# Effect size
+```{r echo=FALSE,warning=FALSE}
+library(nnet)
+# Base model 
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv %>% filter(age>=50 & age<= 90), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+table_x_1 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:mortality", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:cogfunc", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Adjusting for education 
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + raedyrs + race, data = data_surv %>% filter(age>=50 & age<= 90), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + chronic + raedyrs + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + adl + raedyrs + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + iadl + raedyrs + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + raedyrs + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + raedyrs + race + cog_time, data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+table_x_2 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality+education", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+education", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+education", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+education", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+education", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+education", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+
+# Adjusting for smoking status 
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + factor(smoker) + race, data = data_surv %>% filter(age>=50 & age<= 90), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + factor(smoker) + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + factor(smoker) + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + factor(smoker) + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27  + factor(smoker) + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + factor(smoker) + race + cog_time, data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+table_x_3 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality+smoker", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+smoker", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+smoker", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+smoker", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+smoker", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+smoker", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Adjusting for bmi
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + bmi + race, data = data_surv %>% filter(age>=50 & age<= 90), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + bmi + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + bmi + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + bmi + race +  offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + bmi + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + bmi + race + cog_time, data = outcome_slope %>% filter(age>=50 & age<= 90))
+
+table_x_4 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality+bmi", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+bmi", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+bmi", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+bmi", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+bmi", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+bmi", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+table_x = table_x_1 %>% full_join(table_x_2) %>% full_join(table_x_3) %>% full_join(table_x_4) %>% select(-robust.se, -statistic)
+
+table_x %>% gt()
+
+library(officer)
+my_table <- gt(table_x)
+my_table |> gtsave("C:/Users/pku/Desktop/basemodel.docx")
+```
+
+```{r echo=FALSE,warning=FALSE}
+# Stratified by sex
+library(nnet)
+## Men 
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65, data = data_surv %>% filter(sex == 1), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + chronic + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 1))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + adl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 1))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + iadl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 1))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2)  + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(sex == 1))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + race + cog_time , data = outcome_slope %>% filter(sex == 1))
+
+table_y_1 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:men", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:men", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:men", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:men", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2))%>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:men", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:men", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+## Women
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + race, data = data_surv %>% filter(sex == 0), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 0))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 0))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(sex == 0))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope %>% filter(sex == 0))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + race + cog_time, data = outcome_slope %>% filter(sex == 0))
+
+table_y_2 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:women", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:women", p.value = round(p.value, 3),nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:women", p.value = round(p.value, 3),nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:women", p.value = round(p.value, 3),nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:women", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:women", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Stratified by Race 
+
+## White
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65, data = data_surv %>% filter(race == "White"), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "White"))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "White"))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "White"))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = outcome_slope%>% filter(race == "White"))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + cog_time, data = outcome_slope %>% filter(race == "White"))
+
+table_y_3 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:white", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:white", p.value = round(p.value, 3),nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:white", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:white", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:white", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:white", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+## Black
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65  , data = data_surv %>% filter(race == "Black"), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + chronic + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Black"))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Black"))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Black"))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + cog_time  , family = "gaussian", data = outcome_slope%>% filter(race == "Black"))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + cog_time  , data = outcome_slope%>% filter(race == "Black"))
+
+table_y_4 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:black", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:black", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:black", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:black", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:black", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:black", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+## Hispanic
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65, data = data_surv %>% filter(race == "Hispanic"), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Hispanic"))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Hispanic"))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(race == "Hispanic"))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = outcome_slope%>% filter(race == "Hispanic"))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + more_than_65 + cogfunction + cog_time, data = outcome_slope%>% filter(race == "Hispanic"))
+
+table_y_5 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:hispanic", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:hispanic", p.value = round(p.value, 3),  nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:hispanic", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:hispanic", p.value = round(p.value, 3),  nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:hispanic", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:hispanic", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Stratified by Age group 
+
+## Younger
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + race  , data = data_surv %>% filter(more_than_65 == 0), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + chronic + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 0))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + adl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 0))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + iadl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 0))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + cogtot27 + race + cog_time  , family = "gaussian", data = outcome_slope%>% filter(more_than_65 == 0))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + cogfunction + race + cog_time  , data = outcome_slope%>% filter(more_than_65 == 0))
+
+table_y_6 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:younger", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:younger", p.value = round(p.value, 3),  nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:younger", p.value = round(p.value, 3),  nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:younger", p.value = round(p.value, 3),  nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:younger", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:younger", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Stratified by Age group 
+
+## Older
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + race, data = data_surv %>% filter(more_than_65 == 1), robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + chronic + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 1))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + adl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 1))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + iadl + race + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(more_than_65 == 1))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012  + cogtot27 + race + cog_time  , family = "gaussian", data = outcome_slope%>% filter(more_than_65 == 1))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + cogfunction + race + cog_time  , data = outcome_slope%>% filter(more_than_65 == 1))
+
+table_y_7 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:older", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:older", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:older", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:older", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:older", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:older", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+table_y = table_y_1 %>% full_join(table_y_2) %>% full_join(table_y_3) %>%  full_join(table_y_4) %>% full_join(table_y_5) %>% full_join(table_y_6) %>% full_join(table_y_7) %>% select(-robust.se, -statistic)
+
+as.data.frame(table_y) 
+
+```
+
+# Model Figures (Supplemental Figure 6)
+```{r echo=FALSE, message=FALSE,warning=FALSE}
+## By Sex 
+# Chronic disease
+df1 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(sex == "Women")
+
+m1 = glm(chronic_total ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012  + more_than_65 + chronic + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = factor(df1$sex),
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df1$chronic),
+  time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(sex == "Men")
+
+m2 = glm(chronic_total ~scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = factor(df2$sex),
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df2$chronic),
+  time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_chronic = df1 %>% full_join(df2) %>% select(composite_scaled, phat, sex, total = chronic_total, low, high) %>% mutate(outcome = "Chronic disease (count)")
+
+# ADLs 
+df1 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(sex == "Women")
+
+m1 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012  + more_than_65 + adl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = factor(df1$sex),
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df1$adl),
+  time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(sex == "Men")
+
+m2 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = factor(df2$sex),
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df2$adl),
+  time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_adl = df1 %>% full_join(df2) %>% select(composite_scaled, phat, sex, total = adl_total, low, high) %>% mutate(outcome = "ADLs (count)")
+
+# IADLs
+df1 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(sex == "Women")
+
+m1 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = factor(df1$sex),
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df1$iadl),
+  time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(sex == "Men")
+
+m2 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = factor(df2$sex),
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df2$iadl),
+  time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_iadl = df1 %>% full_join(df2) %>% select(composite_scaled, phat, sex, total = iadl_total, low, high) %>% mutate(outcome = "IADLs (count)")
+
+# Mortality
+df1 = data_surv %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  filter(sex == "Women")
+
+m1 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012  + more_than_65, data = df1, robust = T)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = factor(df1$sex),
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df1$time,
+  death = df1$death)
+
+p1 = predict(m1, s1, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+df1$total <- predict(m1, type = "risk")
+
+#####################################
+
+df2 = data_surv %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  filter(sex == "Men")
+
+m2 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65, data = df2, robust = T)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = factor(df2$sex),
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df2$time,
+  death = df2$death)
+
+p2 = predict(m2, s2, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+df2$total <- predict(m2, type = "risk")
+
+df_mortality = df1 %>% full_join(df2) %>% select(composite_scaled, phat, sex, total, low, high) %>% mutate(outcome = "Mortality (risk score)")
+
+#####################################
+
+# Cognition
+df1 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(sex == "Women")
+
+m1 = glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = factor(df1$sex),
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df1$cogtot27),
+  cog_time = mean(df1$cog_time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(sex = if_else(sex == 0, "Women", "Men"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(sex == "Men")
+
+m2 = glm(cogtot27_final ~scale(composite_scaled) + age_baseline + agesq + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = factor(df2$sex),
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df2$cogtot27),
+  cog_time = mean(df2$cog_time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_cognition = df1 %>% full_join(df2) %>% select(composite_scaled, phat, sex, total = cogtot27_final, low, high) %>% mutate(outcome = "Cognition (score)")
+
+df = df_chronic %>% full_join(df_adl) %>% full_join(df_iadl) %>% full_join(df_mortality) %>% full_join(df_cognition) %>% mutate(outcome = factor(outcome, c("Chronic disease (count)", "ADLs (count)", "IADLs (count)", "Mortality (risk score)","Cognition (score)")), outcome = relevel(outcome, "Mortality (risk score)"))
+
+# PLOT
+library(ggh4x)
+ggplot(df, aes(x = composite_scaled, y = phat, colour = sex)) +
+  geom_point(aes(y = total), alpha=0) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(x = composite_scaled, ymin = low, ymax = high), alpha = 0.1, linetype = 0) + 
+  labs(x = "Pace of Aging", y = "Predicted incidence of outcome", color = "Sex") +
+  facet_wrap(~ outcome, scales = "free", ncol = 2) + 
+  theme_minimal() + 
+  scale_color_manual(values = c("navy", "maroon")) + 
+  facetted_pos_scales(
+    y = list(outcome == "Mortality (risk score)" ~ scale_y_continuous(limits=c(0,15),breaks=seq(0,15,3)),
+             outcome == "Cognition (score)" ~ scale_y_continuous(limits=c(10,17),breaks=seq(10,16,2))))
+
+
+## By Race
+
+# Chronic disease
+df1 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(race == "White")
+
+m1 = glm(chronic_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df1$chronic),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(race == "Black")
+
+m2 = glm(chronic_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012  + more_than_65 + chronic + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df2$chronic),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+#####################################
+
+df3 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(race == "Hispanic")
+
+m3 = glm(chronic_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + offset(log(time)), family = "poisson", data = df3)
+
+s3 <- data.frame(composite_scaled = df3$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df3$age_baseline),
+  agesq = mean(df3$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df3$chronic),time = mean(df3$time))
+
+p3 = predict(m3, s3, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df3$phat <- p3$fit 
+df3$low <- p3$fit - 1.96*(p3$se.fit)
+df3$high <- p3$fit + 1.96*(p3$se.fit)
+
+df_chronic = df1 %>% full_join(df2) %>% full_join(df3) %>% select(composite_scaled, phat, race, total = chronic_total, low, high) %>% mutate(outcome = "Chronic disease (count)")
+
+# ADLs 
+df1 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(race == "White")
+
+m1 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df1$adl),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(race == "Black")
+
+m2 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df2$adl),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+#####################################
+
+df3 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(race == "Hispanic")
+
+m3 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + offset(log(time)), family = "poisson", data = df3)
+
+s3 <- data.frame(composite_scaled = df3$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df3$age_baseline),
+  agesq = mean(df3$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df3$adl),time = mean(df3$time))
+
+p3 = predict(m3, s3, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df3$phat <- p3$fit 
+df3$low <- p3$fit - 1.96*(p3$se.fit)
+df3$high <- p3$fit + 1.96*(p3$se.fit)
+
+df_adl = df1 %>% full_join(df2) %>% full_join(df3) %>% select(composite_scaled, phat, race, total = adl_total, low, high) %>% mutate(outcome = "ADLs (count)")
+
+# IADLs
+df1 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(race == "White")
+
+m1 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df1$iadl),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(race == "Black")
+
+m2 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df2$iadl),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+#####################################
+
+df3 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(race == "Hispanic")
+
+m3 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012  + more_than_65 + iadl + offset(log(time)), family = "poisson", data = df3)
+
+s3 <- data.frame(composite_scaled = df3$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df3$age_baseline),
+  agesq = mean(df3$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df3$iadl),time = mean(df3$time))
+
+p3 = predict(m3, s3, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df3$phat <- p3$fit 
+df3$low <- p3$fit - 1.96*(p3$se.fit)
+df3$high <- p3$fit + 1.96*(p3$se.fit)
+
+df_iadl = df1 %>% full_join(df2) %>% full_join(df3) %>% select(composite_scaled, phat, race, total = iadl_total, low, high) %>% mutate(outcome = "IADLs (count)")
+
+# Mortality
+df1 = data_surv %>% mutate(agesq = age_baseline^2) %>% 
+  filter(race == "White")
+
+m1 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65, data = df1, robust = T)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df1$time,
+  death = df1$death)
+
+p1 = predict(m1, s1, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+df1$total <- predict(m1, type = "risk")
+
+#####################################
+
+df2 = data_surv %>% mutate(agesq = age_baseline^2) %>% 
+  filter(race == "Black")
+
+m2 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65, data = df2, robust = T)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df2$time,
+  death = df2$death)
+
+p2 = predict(m2, s2, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+df2$total <- predict(m2, type = "risk")
+
+#####################################
+
+df3 = data_surv %>% mutate(agesq = age_baseline^2) %>% 
+  filter(race == "Hispanic")
+
+m3 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65, data = df3, robust = T)
+
+s3 <- data.frame(composite_scaled = df3$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df3$age_baseline),
+  agesq = mean(df3$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df3$time,
+  death = df3$death)
+
+p3 = predict(m3, s3, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df3$phat <- p3$fit 
+df3$low <- p3$fit - 1.96*(p3$se.fit)
+df3$high <- p3$fit + 1.96*(p3$se.fit)
+df3$total <- predict(m3, type = "risk")
+
+df_mortality = df1 %>% full_join(df2) %>% full_join(df3) %>% select(composite_scaled, phat, race, total, low, high) %>% mutate(outcome = "Mortality (risk score)")
+
+# cognition
+df1 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(race == "White")
+
+m1 = glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df1$cogtot27),cog_time = mean(df1$cog_time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(race == "Black")
+
+m2 = glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df2$cogtot27),cog_time = mean(df2$cog_time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+#####################################
+
+df3 = outcome_slope %>% mutate(agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(race == "Hispanic")
+
+m3 = glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = df3)
+
+s3 <- data.frame(composite_scaled = df3$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df3$age_baseline),
+  agesq = mean(df3$agesq),
+  more_than_65 = 0, 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df3$cogtot27),cog_time = mean(df3$cog_time))
+
+p3 = predict(m3, s3, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df3$phat <- p3$fit 
+df3$low <- p3$fit - 1.96*(p3$se.fit)
+df3$high <- p3$fit + 1.96*(p3$se.fit)
+
+df_cognition = df1 %>% full_join(df2) %>% full_join(df3) %>% select(composite_scaled, phat, race, total = cogtot27_final, low, high) %>% mutate(outcome = "Cognition (score)")
+
+
+df = df_chronic %>% full_join(df_adl) %>% full_join(df_iadl) %>% full_join(df_mortality)%>% full_join(df_cognition) %>% mutate(outcome = factor(outcome, c("Chronic disease (count)", "ADLs (count)", "IADLs (count)", "Mortality (risk score)","Cognition (score)")), outcome = relevel(outcome, "Mortality (risk score)")) 
+
+# PLOT
+ggplot(df, aes(x = composite_scaled, y = phat, colour = race)) +
+  geom_point(aes(y = total), alpha=0) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(x = composite_scaled, ymin = low, ymax = high), alpha = 0.1, linetype = 0) + 
+  labs(x = "Pace of Aging", y = "Predicted incidence of outcome", color = "Race") +
+  facet_wrap(~ outcome, scales = "free",ncol=2) + 
+  theme_minimal() + 
+  scale_color_manual(values = c("navy", "orange", "maroon")) + 
+  facetted_pos_scales(
+    y = list(outcome == "Mortality (risk score)" ~ scale_y_continuous(limits=c(0,20),breaks=seq(0,20,5)),
+             outcome == "Cognition (score)" ~ scale_y_continuous(limits=c(10,17),breaks=seq(10,16,2))))
+
+## By Age group
+
+# Chronic disease
+df1 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(more_than_65 == "Younger")
+
+m1 = glm(chronic_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + chronic + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = factor(df1$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df1$chronic),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(chronic_total, chronic) %>% 
+  filter(more_than_65 == "Older")
+
+m2 = glm(chronic_total ~scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + chronic + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = factor(df2$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  chronic = mean(df2$chronic),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_chronic = df1 %>% full_join(df2) %>% select(composite_scaled, phat, more_than_65, total = chronic_total, low, high) %>% mutate(outcome = "Chronic disease (count)")
+
+# ADLs 
+df1 = outcome_slope %>%  mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(more_than_65 == "Younger")
+
+m1 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + adl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = factor(df1$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0,
+  adl = mean(df1$adl),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(adl_total, adl) %>% 
+  filter(more_than_65 == "Older")
+
+m2 = glm(adl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + adl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = factor(df2$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  adl = mean(df2$adl),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_adl = df1 %>% full_join(df2) %>% select(composite_scaled, phat, more_than_65, total = adl_total, low, high) %>% mutate(outcome = "ADLs (count)")
+
+# IADLs
+df1 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(more_than_65 == "Younger")
+
+m1 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + iadl + offset(log(time)), family = "poisson", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = factor(df1$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  iadl = mean(df1$iadl),time = mean(df1$time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(iadl_total, iadl) %>% 
+  filter(more_than_65 == "Older")
+
+m2 = glm(iadl_total ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 + iadl + offset(log(time)), family = "poisson", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = factor(df2$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0,
+  iadl = mean(df2$iadl),time = mean(df2$time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_iadl = df1 %>% full_join(df2) %>% select(composite_scaled, phat, more_than_65, total = iadl_total, low, high) %>% mutate(outcome = "IADLs (count)")
+
+# Mortality
+df1 = data_surv %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  filter(more_than_65 == "Younger")
+
+m1 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012, data = df1, robust = T)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = factor(df1$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0,
+  time = df1$time,
+  death = df1$death)
+
+p1 = predict(m1, s1, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+df1$total <- predict(m1, type = "risk")
+
+#####################################
+
+df2 = data_surv %>%  mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  filter(more_than_65 == "Older")
+
+m2 = coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + agesq + sex + base_2008 + base_2010 + base_2012 , data = df2, robust = T)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = factor(df2$more_than_65), 
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  time = df2$time,
+  death = df2$death)
+
+p2 = predict(m2, s2, type = "risk", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+df2$total <- predict(m2, type = "risk")
+
+df_mortality = df1 %>% full_join(df2) %>% select(composite_scaled, phat, more_than_65, total, low, high) %>% mutate(outcome = "Mortality (risk score)")
+
+# Cognition
+df1 = outcome_slope %>% mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+    drop_na(cogtot27_final, cogtot27) %>% 
+    filter(more_than_65 == "Younger")
+
+m1 = glm(cogtot27_final ~ scale(composite_scaled) + sex + age_baseline + agesq + base_2008 + base_2010 + base_2012 + cogtot27 + cog_time, family = "gaussian", data = df1)
+
+s1 <- data.frame(composite_scaled = df1$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df1$age_baseline),
+  agesq = mean(df1$agesq),
+  more_than_65 = factor(df1$more_than_65),
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df1$cogtot27),
+  cog_time = mean(df1$cog_time))
+
+p1 = predict(m1, s1, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df1$phat <- p1$fit 
+df1$low <- p1$fit - 1.96*(p1$se.fit)
+df1$high <- p1$fit + 1.96*(p1$se.fit)
+
+#####################################
+
+df2 = outcome_slope %>%  mutate(more_than_65 = if_else(more_than_65 == 0, "Younger", "Older"),
+                               agesq = age_baseline^2) %>% 
+  drop_na(cogtot27_final, cogtot27) %>% 
+  filter(more_than_65 == "Older")
+
+m2 = glm(cogtot27_final ~scale(composite_scaled) + sex + age_baseline + agesq + base_2008 + base_2010 + base_2012 + cogtot27 + cog_time, family = "gaussian", data = df2)
+
+s2 <- data.frame(composite_scaled = df2$composite_scaled,
+  sex = 0,
+  age_baseline = mean(df2$age_baseline),
+  agesq = mean(df2$agesq),
+  more_than_65 = factor(df2$more_than_65),  
+  base_2008 = 0,
+  base_2010 = 0,
+  base_2012 = 0, 
+  cogtot27 = mean(df2$cogtot27),
+  cog_time = mean(df2$cog_time))
+
+p2 = predict(m2, s2, type="response", se.fit=TRUE)
+
+## calculate and store predicted values
+df2$phat <- p2$fit 
+df2$low <- p2$fit - 1.96*(p2$se.fit)
+df2$high <- p2$fit + 1.96*(p2$se.fit)
+
+df_cognition = df1 %>% full_join(df2) %>% select(composite_scaled, phat, more_than_65, total = cogtot27_final, low, high) %>% mutate(outcome = "Cognition (score)")
+
+
+df = df_chronic %>% full_join(df_adl) %>% full_join(df_iadl) %>% full_join(df_mortality) %>% full_join(df_cognition) %>% mutate(outcome = factor(outcome, c("Chronic disease (count)", "ADLs (count)", "IADLs (count)", "Mortality (risk score)","Cognition (score)")), outcome = relevel(outcome, "Mortality (risk score)"))
+
+# PLOT
+ggplot(df,aes(x = composite_scaled, y = phat, colour = more_than_65)) +
+  geom_point(aes(y = total), alpha=0) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(x = composite_scaled, ymin = low, ymax = high), alpha = 0.1, linetype = 0) + 
+  labs(x = "Pace of Aging", y = "Predicted incidence of outcome", color = "Age group") +
+  facet_wrap(~ outcome, scales = "free",ncol=2) + 
+  theme_minimal() + 
+  scale_color_manual(values = c("skyblue3","aquamarine3")) + 
+  facetted_pos_scales(
+    y = list(outcome == "Mortality (risk score)" ~ scale_y_continuous(limits=c(0,20),breaks=seq(0,20,5)),
+             outcome == "Cognition (score)" ~ scale_y_continuous(limits=c(10,20),breaks=seq(10,20,5))))
+```
+
+```{r echo=FALSE,warning=FALSE}
+# Additive Interaction 
+
+## Sex 
+
+# Mortality
+coxmod <- coxph(Surv(time, death) ~ scale(composite_scaled)*factor(sex) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65, data = data_surv, robust = T)
+
+int_1 = epi.interaction(coxmod, c(1,2,9), param = "product", 
+   conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "mortality*sex")
+
+# Chronic Disease
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(sex) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + time, family = "poisson", data = outcome_slope)
+
+int_2 = epi.interaction(chronic, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "chronic*sex")
+
+# ADLs
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(sex) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + adl + time, family = "poisson", data = outcome_slope)
+
+int_3 = epi.interaction(adl, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "adl*sex")
+
+# IADLs
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(sex) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + time, family = "poisson", data = outcome_slope)
+
+int_4 = epi.interaction(iadl, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "iadl*sex")
+
+# cognition
+cognition <- glm(cogtot27_final  ~ scale(composite_scaled) + scale(composite_scaled)*factor(sex) + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = outcome_slope)
+
+int_5 = epi.interaction(cognition, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "cognition*sex")
+
+
+int_sex = int_1 %>% full_join(int_2) %>% full_join(int_3) %>% full_join(int_4) %>% full_join(int_5)
+
+table_z_1 = coxmod %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(sex)1") %>% mutate(term = "int_sex:mortality", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(sex)1") %>% mutate(term = "int_sex:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(sex)1") %>% mutate(term = "int_sex:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(sex)1") %>% mutate(term = "int_sex:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cognition %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(sex)1") %>% mutate(term = "int_sex:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+
+## Race
+
+# Mortality 
+coxmod <- coxph(Surv(time, death) ~ scale(composite_scaled)*race + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65, data = data_surv %>% filter(race != "Other") %>% mutate(race = factor(race, levels = c("White", "Black", "Hispanic"))), robust = T)
+
+#### Black 
+int_1 = epi.interaction(coxmod, c(1,2,11), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "mortality*black")
+
+#### Hispanic
+int_2 = epi.interaction(coxmod, c(1,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2)  %>%  mutate(model = "mortality*hispanic")
+
+# Chronic disease
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(composite_scaled)*race + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + time, family = "poisson", data = outcome_slope %>% filter(race != "Other") %>% mutate(race = factor(race, levels = c("White", "Black", "Hispanic"))))
+
+#### Black
+int_3 = epi.interaction(chronic, c(2,3,14), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "chronic*black")
+
+#### Hispanic 
+int_4 = epi.interaction(chronic, c(2,4,15), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "chronic*hispanic")
+
+# ADLs
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(composite_scaled)*race + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + adl + time, family = "poisson", data = outcome_slope %>% filter(race != "Other") %>% mutate(race = factor(race, levels = c("White", "Black", "Hispanic"))))
+
+#### Black
+int_5 = epi.interaction(adl, c(2,3,14), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "adl*black")
+
+#### Hispanic 
+int_6 = epi.interaction(adl, c(2,4,15), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "adl*hispanic")
+
+# IADLs
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(composite_scaled)*race + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + time, family = "poisson", data = outcome_slope %>% filter(race != "Other") %>% mutate(race = factor(race, levels = c("White", "Black", "Hispanic"))))
+
+#### Black 
+int_7 = epi.interaction(iadl, c(2,3,14), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "iadl*black")
+
+#### Hispanic 
+int_8 = epi.interaction(iadl, c(2,4,15), param = "product", 
+   conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "iadl*hispanic")
+
+
+# cognition
+cognition <- glm(cogtot27_final ~ scale(composite_scaled) + scale(composite_scaled)*race + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + cog_time, family = "gaussian", data = outcome_slope %>% filter(race != "Other") %>% mutate(race = factor(race, levels = c("White", "Black", "Hispanic"))))
+
+#### Black 
+int_9 = epi.interaction(cognition, c(2,3,14), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "cognition*black")
+
+#### Hispanic 
+int_10 = epi.interaction(cognition, c(2,4,15), param = "product", 
+   conf.level = 0.95)$reri %>% round(2) %>%  mutate(model = "cognition*hispanic")
+
+int_race = int_1 %>% full_join(int_2) %>% full_join(int_3) %>% full_join(int_4) %>% full_join(int_5) %>% full_join(int_6) %>% full_join(int_7) %>% full_join(int_8)%>% full_join(int_9)%>% full_join(int_10)
+
+
+table_z_2 = coxmod %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceBlack") %>% mutate(term = "int_black:mortality", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceBlack") %>% mutate(term = "int_black:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceBlack") %>% mutate(term = "int_black:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceBlack") %>% mutate(term = "int_black:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cognition %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceBlack") %>% mutate(term = "int_black:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+table_z_3 = coxmod %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceHispanic") %>% mutate(term = "int_Hispanic:mortality", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceHispanic") %>% mutate(term = "int_Hispanic:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceHispanic") %>% mutate(term = "int_Hispanic:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceHispanic") %>% mutate(term = "int_Hispanic:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cognition %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):raceHispanic") %>% mutate(term = "int_Hispanic:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+
+## Age group 
+
+# Mortality
+coxmod <- coxph(Surv(time, death) ~ scale(composite_scaled)*factor(more_than_65) + sex +  age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 , data = data_surv, robust = T)
+ 
+int_1 = epi.interaction(coxmod, c(1,2,9), param = "product", conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "mortality*age group")
+
+# Chronic Disease
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(more_than_65) + sex +  age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + chronic + time, family = "poisson", data = outcome_slope)
+
+int_2 = epi.interaction(chronic, c(2,3,12), param = "product", 
+   conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "chronic*age group")
+
+# ADLs
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(more_than_65) + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + adl + time , family = "poisson", data = outcome_slope)
+
+int_3 = epi.interaction(adl, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "adl*age group")
+
+# IADLs
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(composite_scaled)*factor(more_than_65) + sex + age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + iadl + time, family = "poisson", data = outcome_slope)
+
+int_4 = epi.interaction(iadl, c(2,3,12), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "iadl*age group")
+
+# cognition
+cognition <- glm(cogtot27_final ~ scale(composite_scaled) + scale(composite_scaled)*factor(more_than_65) + sex +  age_baseline + I(age_baseline^2) + base_2008 + base_2010 + base_2012 + cogtot27 + cog_time, family = "gaussian", data = outcome_slope)
+
+int_5 = epi.interaction(cognition, c(2,3,12), param = "product", 
+   conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "cognition*age group")
+
+
+int_age = int_1 %>% full_join(int_2) %>% full_join(int_3) %>% full_join(int_4)%>% full_join(int_5)
+
+int = int_sex %>% full_join(int_race) %>% full_join(int_age) %>% select(model, everything())
+
+
+table_z_4 = coxmod %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(more_than_65)1") %>% mutate(term = "int_agegroup:mortality", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(more_than_65)1") %>% mutate(term = "int_agegroup:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(more_than_65)1") %>% mutate(term = "int_agegroup:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(more_than_65)1") %>% mutate(term = "int_agegroup:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cognition %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled):factor(more_than_65)1") %>% mutate(term = "int_agegroup:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+
+table_z = table_z_1 %>% full_join(table_z_2) %>% full_join(table_z_3) %>% full_join(table_z_4) 
+my_table <- gt(table_z)
+my_table |> gtsave("C:/Users/pku/Desktop/int.docx")
+
+```
+
+```{r}
+# Leave-one-out analysis (Supplemental Figure 7)
+# Corrplot
+slopes20240111 = slopes  %>%
+  rowwise %>% 
+  mutate(poa_a1c = mean(c(cysc_slope, crp_slope, dbp_slope, waist_slope, gait_slope, 
+                          grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_cysc = mean(c(a1c_slope, crp_slope, dbp_slope, waist_slope, gait_slope, 
+                           grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_crp = mean(c(a1c_slope, cysc_slope, dbp_slope, waist_slope, gait_slope, 
+                          grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_dbp = mean(c(a1c_slope, cysc_slope, crp_slope, waist_slope, gait_slope, 
+                          grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_waist = mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, gait_slope, 
+                            grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_gait = mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, waist_slope, 
+                           grip_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_grip = mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, waist_slope, 
+                           gait_slope, pflow_slope, btest_slope), na.rm = TRUE),  
+         poa_pflow = mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, waist_slope, 
+                            gait_slope, grip_slope, btest_slope), na.rm = TRUE),
+         poa_btest = mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, waist_slope, 
+                            gait_slope, grip_slope, pflow_slope), na.rm = TRUE) ) %>% 
+  ungroup() %>% group_by(sex) %>%
+  mutate(across(starts_with("poa"), ~ scale(.) %>% as.vector))
+
+library(GGally)
+ordercolors<-c("maroon", "navy")
+
+# mutate(group = factor(group, levels = c("composite_scaled","poa_a1c","poa_crp",
+#                                         "poa_cysc","poa_dbp","poa_pflow",
+#                                         "poa_waist","poa_gait","poa_grip","poa_btest"), 
+#                       labels = c("original PoA", "Without HbA1c","Without C-reactive protein", 
+#                                  "Without Cystatin-C","Without Diastolic Blood Pressure",
+#                                  "Without Peak Flow","Without Waist Circumference", 
+#                                  "Without Gait Speed","Without Balance","Without Grip Strength")))
+
+## correlations among different versions of the measure
+ggpairs(slopes20240111, 
+        columns = c("composite_scaled","poa_a1c","poa_crp","poa_cysc","poa_dbp",
+                    "poa_waist","poa_pflow","poa_grip","poa_btest","poa_gait"),
+        columnLabels = c("original PoA","Without HbA1c", "Without C-reactive Protein",
+                         "Without Cystatin-C", "Without Diastolic BP","Without Waist Circ.", 
+                         "Without Peak Flow", "Without Grip Strength", "Without Balance Test",
+                         "Without Gait Speed"),
+        mapping = ggplot2::aes(fill=sex, color=sex), 
+        lower = list(continuous=wrap('points', shape=21, size=0.45, alpha=0.65)), 
+        diag = list(continuous=wrap("densityDiag", color="black", alpha=0.65)), 
+        upper = list(continuous=wrap("cor", size=3.5), combo=wrap("box_no_facet", color="grey20")))+ # 
+  scale_fill_manual(values = ordercolors) +
+  scale_color_manual(values = ordercolors) +
+  ggplot2::theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+
+
+slopes3 <- slopes20240111 %>% select("id","poa_dbp","poa_grip","poa_crp",
+                              "poa_cysc","poa_a1c","poa_waist","poa_gait",
+                              "poa_pflow","poa_btest") 
+
+outcome_slope <- outcome_slope %>% left_join(slopes3,by="id")
+data_surv <- data_surv %>% left_join(slopes3,by="id")
+#### leave-one-out regression analysis
+#### effect-sizes for different versions of the measure
+library(nnet)
+
+generate_table <- function(poa_vars) {
+  # formula
+  formula_cox <- as.formula(paste("Surv(time, death) ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + race"))
+  formula_chronic <- as.formula(paste("chronic_total ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + offset(log(time))"))
+  formula_adl <- as.formula(paste("adl_total ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race +  offset(log(time))"))
+  formula_iadl <- as.formula(paste("iadl_total ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race +  offset(log(time))"))
+  formula_cogtot <- as.formula(paste("cogtot27_final ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + race + cog_time"))
+  formula_cogfunc <- as.formula(paste("cogfunction_final ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.y + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time"))
+  
+  # model
+  cox <- coxph(formula_cox, data = data_surv, robust = TRUE)
+  chronic <- glm(formula_chronic, family = "poisson", data = outcome_slope)
+  adl <- glm(formula_adl, family = "poisson", data = outcome_slope)
+  iadl <- glm(formula_iadl, family = "poisson", data = outcome_slope)
+  cogtot <- glm(formula_cogtot, family = "gaussian", data = outcome_slope)
+  cogfunc <- multinom(formula_cogfunc, data = outcome_slope)
+  
+  # generate table
+  table <- cox %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("mortality:", poa_vars), p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+    full_join(chronic %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("chronic:", poa_vars), p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+    full_join(adl %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("adl:", poa_vars), p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+    full_join(iadl %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("iadl:", poa_vars), p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+    full_join(cogtot %>% broom::tidy(exp = FALSE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("cogtot:", poa_vars), p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+    full_join(cogfunc %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("cogfunc:", poa_vars), p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+  
+  return(table)
+}
+
+# list of variable
+ poa_vars <- c("composite_scaled","poa_a1c","poa_cysc","poa_crp","poa_dbp",
+                 "poa_waist","poa_gait","poa_grip","poa_pflow","poa_btest")
+
+# list of result table
+table_1 <- generate_table("composite_scaled")
+table_2 <- generate_table("poa_a1c")
+table_3 <- generate_table("poa_cysc")
+table_4 <- generate_table("poa_crp")
+table_5 <- generate_table("poa_dbp")
+table_6 <- generate_table("poa_waist")
+table_7 <- generate_table("poa_gait")
+table_8 <- generate_table("poa_grip")
+table_9 <- generate_table("poa_pflow")
+table_10 <- generate_table("poa_btest")
+
+library(ggthemes)
+library(RColorBrewer)
+# merge the table to plot
+table_1 %>% full_join(table_2) %>% full_join(table_3) %>% full_join(table_4) %>% 
+  full_join(table_5) %>% full_join(table_6)%>% full_join(table_7) %>% 
+  full_join(table_8)%>% full_join(table_9)%>% full_join(table_10) %>% 
+  separate(term, into = c("outcome", "group"), sep = ":") %>% 
+  mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                             !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  filter(outcome != "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl","cogfunc1","cogfunc2"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("composite_scaled","poa_a1c","poa_crp","poa_cysc","poa_dbp",
+                                           "poa_waist","poa_pflow","poa_grip","poa_btest","poa_gait"),
+                        labels = c("original PoA","Without HbA1c", 
+                                   "Without C-reactive Protein","Without Cystatin-C",                                                 "Without Diastolic BP", "Without Waist Circ.", "Without Peak Flow",
+                 "Without Grip Strength", "Without Balance Test", "Without Gait Speed")),
+         group = factor(group, rev(levels(group)))) %>%
+  ggplot(aes(x = group, y = estimate,
+             fill = group)) + 
+  geom_bar(stat = "identity",colour="black", 
+           position = position_dodge(0.9), width = 0.8, alpha = 0.8)+
+  geom_errorbar(aes(x = group, ymin = conf.low, ymax = conf.high), 
+                position = position_dodge(0.9), width = 0.25) + 
+  xlab("") + 
+  ylab("Pace of Aging Effect-Size") + 
+  theme_calc() + 
+  coord_flip(ylim = c(1.0, 2.1)) + 
+  guides(fill = guide_legend(reverse = TRUE)) + 
+  facet_wrap(~ factor(outcome), nrow = 2)+
+  scale_fill_manual(name = " ", values = rev(brewer.pal(10, "Spectral"))) +
+  scale_y_continuous(expand = c(0, 0)) 
+
+```
+
+```{r eval=FALSE, message=FALSE, include=FALSE}
+# Association of Pace of Aging with outcome (Figure 3)
+table_y_1 %>% full_join(table_y_2) %>% separate(term, into = c("outcome", "group")) %>% 
+  mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                            !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  filter(outcome != "cogtot") %>% 
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl","cogfunc1","cogfunc2"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("men", "women"), labels = c("Men", "Women")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size in HRS") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1, 2.3)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = "Sex", values = c("maroon", "navy")) +#"#862a2d", "#468099"
+  scale_y_continuous( expand = c(0, 0)) 
+
+table_y_3 %>% full_join(table_y_4) %>% full_join(table_y_5) %>% separate(term, into = c("outcome", "group")) %>% 
+    mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                            !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  filter(outcome != "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl",
+                                              "iadl","cogfunc1","cogfunc2"), 
+                          labels = c("Mortality (HR)", "Chronic disease (IRR)", 
+                                     "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("white", "black", "hispanic"), 
+                        labels = c("White", "Black", "Hispanic")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size (adjusted for KDM)") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1.0, 2.9)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = "Race", values = c("#9cb0c3", "#e9b383", "#7c9d97")) +
+  scale_y_continuous( expand = c(0, 0)) 
+
+
+table_y_6 %>% full_join(table_y_7) %>% separate(term, into = c("outcome", "group")) %>%   
+  mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                            !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  filter(outcome != "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl","cogfunc1","cogfunc2"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("younger", "older"), labels = c("Younger (<65)", "Older (65+)")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size in HRS") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1,2)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = "Age group", values = c("#97c8af","#96b6d8")) +
+  scale_y_continuous( expand = c(0, 0)) 
+```
+
+```{r}
+# Fixed effect of time in each biomarker (Supplemental Figure 2 C)
+exclusion$time <- 5*exclusion$time
+
+## Function of extract the coef
+output_time_effects <- data.frame(biomarker = character(), time_estimate = numeric(), 
+                                  time_p_value = numeric(), stringsAsFactors = FALSE)
+ for (k in 1:length(biomarkers2)) {
+   i <- biomarkers2[k]
+   j <- biomarkers_agebaseline[k]
+   model <- lmerTest::lmer(get(i) ~ bs(get(j), df = 4) + sex + base_2008 + base_2010 + base_2012 + 
+                             time + time:get(j) + (time | hhidpn), 
+                 data = exclusion %>% drop_na(i) %>% group_by(hhidpn) %>% filter(n() > 1) %>% ungroup(),
+                 control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+   # i <- biomarkers_std[k]
+   # j <- biomarkers_blage[k]
+   # model <- lmerTest::lmer(get(i) ~ bs(get(j), df = 4) + sex + year_baseline + time + time:get(j) + (time | idauniq), 
+   #                         control = lmerControl(optimizer = 'Nelder_Mead'),
+   #                          data = exclusion %>% drop_na(i) %>% group_by(idauniq) %>% filter(n() > 1) %>% ungroup())
+   
+   model_summary <- summary(model)
+   matrix <- cbind.data.frame(rownames(model_summary$coefficients), as.matrix(model_summary$coefficients))
+   matrix$pvalue <- -log10(matrix$`Pr(>|t|)`)
+
+     time_estimate <- round(matrix["time", "Estimate"], 7)
+     time_p_value <- round(matrix["time", "pvalue"], 7)
+
+   output_time_effects <- rbind(output_time_effects, data.frame(biomarker = i, time_estimate = time_estimate, time_p_value = time_p_value)) }
+
+print(output_time_effects)
+
+# scatter plot of fixed effect in HRS and ELSA
+scatter <- data.frame(
+  variable = c("HbA1c", "log C-reactive Protein", "DBP", "Peakflow", "Waist Circ.", 
+               "Balance Test", "Grip Strength", "Systolic Blood Pressure", 
+               "Body Mass Index", "Total Cholesterol", "High-Density Lipoprotein", 
+               "Pulse Pressure"),
+  beta_HRS = c(0.0097100, 0.0032677, -0.0236406, -0.0495915, -0.0015716, 
+               -0.0619281, -0.0604568, 0.0003099, 0.0004619, -0.0006455, 
+               -0.0004024, 0.0020126),
+  beta_ELSA = c(0.021331, 0.0151304, -0.0313595, -0.0619294, 0.0066777, 
+                -0.0613836, -0.0551477, 0.0185662, -0.0078376, -0.0259198, 
+                -0.0031006, 0.0020604) )
+
+ggplot(scatter, aes(x = beta_HRS, y = beta_ELSA)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkgrey", size = 1.5) +
+  geom_point(color = "darkblue", size = 3) + 
+  geom_text(aes(label = variable), vjust = -1, hjust = 0.3, size = 3) + 
+  labs(title = "5 year average change of Biomarker",
+       x = "Estimate in HRS",
+       y = "Estimate in ELSA") +
+  scale_x_continuous(limits = c(-0.05, 0.4))+
+  scale_y_continuous(limits = c(0, 0.4))+
+  theme_bw()  
+
+```
+
+```{r}
+########### Comparsion analysis: aging clocks comparsion
+# Comparison with blood-chemistry measures of biological age (Figure 4)
+library(readr)
+PhenoAge_Revised032320DK_v12 <- read_dta("C:/Users/pku/Downloads/PhenoAge_Revised032320DK_v12.dta")
+new_bioage_df <- read_csv("C:/Users/pku/Downloads/new_bioage_df.csv")
+
+PhenoAge <- PhenoAge_Revised032320DK_v12 %>% select(hhidpn, age13, PhenoAge) %>%
+                            mutate(id=as.character(hhidpn))
+
+KDM_HD <- new_bioage_df %>% filter(kdm<=200) %>% select(sampleID, hd, kdm) %>% 
+                     mutate(id=as.character(sampleID))
+
+comparsion <- PhenoAge %>% left_join(KDM_HD, by='id') %>% 
+                select(id, age13, PhenoAge, hd, kdm)
+
+comparsion <- na.omit(comparsion)
+
+# Age residualized
+model_pheno <- lm(PhenoAge ~ age13, data=comparsion)
+comparsion$pheno_resid <- residuals(model_pheno)
+
+model_hd <- lm(hd ~ age13, data=comparsion)
+comparsion$hd_resid <- residuals(model_hd)
+
+model_kdm <- lm(kdm ~ age13, data=comparsion)
+comparsion$kdm_resid <- residuals(model_kdm)
+
+# Merge PoA data
+POA <- slopes %>% select(id, age, composite_scaled)
+comparsion <- comparsion %>% left_join(POA, by='id')
+comparsion <- na.omit(comparsion)
+model_poa <- lm(composite_scaled ~ age, data=comparsion)
+comparsion$poa_resid <- residuals(model_poa)
+
+data_surv <- comparsion %>% select(-composite_scaled) %>% left_join(data_surv, by ="id")
+outcome_slope <- comparsion %>% select(-composite_scaled) %>% left_join(outcome_slope, by ="id")
+
+
+# Comparison with blood-chemistry measures of epigenetic age (Figure 5)
+BalachandranPoAClockData <- read_csv("C:/Users/pku/Desktop/HRSPoA/R2/BalachandranPoAClockData.csv")
+epigentic <- BalachandranPoAClockData %>% mutate(id=as.character(hhidpn)) %>% 
+              select("id","clockage","pcgrimage", "dunedinpace", "r_pcgrimage",
+                     "r_dunedinpace") %>% 
+  left_join(slopes %>% select(id, composite_scaled),by="id")
+  
+data_surv <- epigentic %>% select(-composite_scaled) %>% left_join(data_surv, by ="id")
+outcome_slope <- epigentic %>% select(-composite_scaled) %>% left_join(outcome_slope, by ="id")
+
+### Corrplot (Fig 5 Panel A)
+agevar = c("composite_scaled","hd","kdm_resid","pheno_resid")
+
+label = c("composite_scaled" = "Pace of Aging \n (original)",
+          "hd" = "Homeostatic \n Dysregulation",
+          "kdm_resid" = "Klemera-Doubal method \n (Age-residualized)",
+          "pheno_resid" = "PhenoAge \n (Age-residualized)")
+
+axis_type = c("composite_scaled" = "float",
+              "hd" = "float",
+              "kdm_resid" = "float",
+              "pheno_resid" = "float")
+
+plot_baa(comparsion, agevar, label, axis_type)
+
+### Corrplot (Fig 5 Panel A)
+agevar = c("composite_scaled", "dunedinpace","r_pcgrimage")
+
+label = c("composite_scaled" = "Pace of Aging \n (original)",
+          "dunedinpace" = "DunedinPACE",
+          "r_pcgrimage" = "GrimAge \n (Age-residualized)")
+
+axis_type = c("composite_scaled" = "float",
+              "dunedinpace" = "float",
+              "r_pcgrimage" = "float")
+
+plot_baa(epigentic, agevar, label, axis_type)
+
+# regression
+library(nnet)
+#### Epigenetic clocks 
+# PoA
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_1 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:PoA", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:PoA", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:PoA", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:PoA", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:PoA", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# dunedinpace
+cox <- coxph(Surv(time, death) ~ scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_2 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_dunedinpace)") %>% mutate(term = "mortality:DunedinPACE", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>%
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_dunedinpace)") %>% mutate(term = "chronic:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_dunedinpace)") %>% mutate(term = "adl:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_dunedinpace)") %>% mutate(term = "iadl:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_dunedinpace)") %>% mutate(term = "cogfunc:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of GrimAge
+cox <- coxph(Surv(time, death) ~ scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_3 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_pcgrimage)") %>% mutate(term = "mortality:GrimAge", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_pcgrimage)") %>% mutate(term = "chronic:GrimAge", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_pcgrimage)") %>% mutate(term = "adl:GrimAge", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_pcgrimage)") %>% mutate(term = "iadl:GrimAge", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(r_pcgrimage)") %>% mutate(term = "cogfunc:GrimAge", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+table_x_1 %>% full_join(table_x_2) %>% full_join(table_x_3) %>% 
+  separate(term, into = c("outcome", "group")) %>% 
+  mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                             !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl","cogfunc1","cogfunc2"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("PoA", "DunedinPACE", "GrimAge"), labels = c("PoA (original)", "DunedinPACE (age residuals)","GrimAge (age residuals)")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+             fill = group)) + geom_bar(stat = "identity",colour="black", 
+                                       position=position_dodge(0.9),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Pace of Aging Effect-Size in HRS") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1.0, 2.25)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = " ", values = rev(c("#B2182B","#f1b74e","#4393C3"))) +
+  scale_y_continuous( expand = c(0, 0)) 
+
+
+# DunedinPACE
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + scale(r_dunedinpace) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_2a = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:DunedinPACE", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:DunedinPACE", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of GrimAge
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + scale(r_pcgrimage) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_3a = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:GrimAge", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:GrimAge", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:GrimAge", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:GrimAge", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:GrimAge", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+
+
+#### Figure 4 Panel B
+
+# PoA
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_1 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:PoA", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:PoA", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:PoA", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:PoA", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:PoA", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of HD
+cox <- coxph(Surv(time, death) ~ scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_2 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(hd_resid)") %>% mutate(term = "mortality:HD", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>%
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(hd_resid)") %>% mutate(term = "chronic:HD", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(hd_resid)") %>% mutate(term = "adl:HD", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(hd_resid)") %>% mutate(term = "iadl:HD", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(hd_resid)") %>% mutate(term = "cogfunc:HD", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of KDM
+cox <- coxph(Surv(time, death) ~ scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_3 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(kdm_resid)") %>% mutate(term = "mortality:KDM", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>%
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(kdm_resid)") %>% mutate(term = "chronic:KDM", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(kdm_resid)") %>% mutate(term = "adl:KDM", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(kdm_resid)") %>% mutate(term = "iadl:KDM", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(kdm_resid)") %>% mutate(term = "cogfunc:KDM", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of PhenoAge
+cox <- coxph(Surv(time, death) ~ scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_4 = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(pheno_resid)") %>% mutate(term = "mortality:PhenoAge", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(pheno_resid)") %>% mutate(term = "chronic:PhenoAge", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(pheno_resid)") %>% mutate(term = "adl:PhenoAge", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(pheno_resid)") %>% mutate(term = "iadl:PhenoAge", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(pheno_resid)") %>% mutate(term = "cogfunc:PhenoAge", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+
+# age residuals of HD
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + scale(hd_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_2a = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:HD", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:HD", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:HD", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:HD", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:HD", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:HD", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of KDM
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + scale(kdm_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_3a = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:KDM", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:KDM", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:KDM", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:KDM", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:KDM", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:KDM", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# age residuals of PhenoAge
+cox <- coxph(Surv(time, death) ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + race, data = data_surv, robust = T)
+
+chronic <- glm(chronic_total ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + chronic + race + time, family = "poisson", data = outcome_slope)
+
+adl <- glm(adl_total ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + adl + race + time, family = "poisson", data = outcome_slope)
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + iadl + race + time, family = "poisson", data = outcome_slope)
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogtot27 + race + cog_time, family = "gaussian", data = outcome_slope)
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + scale(pheno_resid) + age_baseline + I(age_baseline^2) + sex + base_2008 + base_2010 + base_2012 + more_than_65 + cogfunction + race + cog_time, data = outcome_slope)
+
+table_x_4a = cox %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "mortality:PhenoAge", p.value = round(p.value, 3), nobs = cox$n) %>% mutate_at(c(2,3,4,5,7,8), round, 2) %>% 
+  full_join(chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:PhenoAge", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:PhenoAge", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:PhenoAge", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:PhenoAge", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc:PhenoAge", p.value = round(p.value, 3), nobs = nobs(cogfunc)) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# table_x_1 %>% full_join(table_x_2) %>% full_join(table_x_3) %>% full_join(table_x_4) 
+table_x_1 %>% full_join(table_x_2a) %>% full_join(table_x_3a) %>% full_join(table_x_4a) %>%
+  separate(term, into = c("outcome", "group")) %>% 
+  mutate(outcome = case_when(is.na(y.level) ~ outcome,
+                             !is.na(y.level) ~ paste0(outcome, y.level))) %>% 
+  filter(outcome != "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", 
+                                              "adl", "iadl","cogfunc1","cogfunc2"), 
+                          labels = c("Mortality (HR)", "Chronic disease (IRR)", 
+                                     "ADLs (IRR)", "IADLs (IRR)","CIND (OR)","Dementia (OR)")),
+         group = factor(group, levels = c("PoA", "HD", "KDM","PhenoAge"), 
+                        labels = c("Original", "Adjusted for HD", 
+                                   "Adjusted for KDM","Adjusted for PhenoAge")),
+         group = factor(group, rev(levels(group)))) %>%
+ggplot(aes(x = outcome, y = estimate,
+           fill = group)) + 
+  geom_bar(stat = "identity",colour="black", position=position_dodge(0.9),
+           width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), 
+                position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Pace of Aging Effect-Size") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1.0, 1.9)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = " ", values = rev(c("#862a2d","#96b6d8", "#e9b383", "#97c8af"))) +
+  scale_y_continuous(expand = c(0, 0)) 
+
+# "#862a2d","#9cb0c3", "#e6b379", "#7c9d97"
+
+```
+

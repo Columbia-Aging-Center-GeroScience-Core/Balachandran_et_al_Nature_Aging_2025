@@ -1,0 +1,1194 @@
+---
+title: "HRS_PoA"
+author: "HemingPei"
+date: "2025-03-11"
+output: html_document
+---
+
+\newpage
+### Load packages & Prepare data 
+```{r include=FALSE}
+# Load packages 
+packages <- c("tidyverse", "haven", "furniture", "sjlabelled", "skimr", "naniar",
+              "nephro", "foreign", "patchwork", "corrplot", "plotmo", "arsenal", 
+              "lme4", "ModelMetrics", "MuMIn", "optimx", "minqa", "survival", 
+              "survminer", "lubridate", "ggfortify", "splines", "viridis", 
+              "psych", "stargazer", "broom.mixed", "GGally", "DescTools","gt", 
+              "xtable", "gridExtra", "extrafont","ggsci", "epiR","cowplot","float",
+              "tidyr", "tidyselect","gtsummary","flextable","gtExtras","ggExtra")
+lapply(packages, library, character.only = TRUE)
+
+# Import data
+data <- read_dta("C:/Users/pku/Desktop/HRSPoA/Data/HRSPoA_BiomarkerFile_230921(1).dta") %>% 
+        # label the demographic variables
+        mutate(race = case_when(race == 1 ~ "White", 
+                                race == 2 ~ "Black", 
+                                race == 3 ~ "Hispanic",
+                                race == 4 ~ "Other"),
+               sex = case_when(ragender == 1 ~ "Male", 
+                               ragender == 2 ~ "Female"),            
+               edu = case_when(raeduc == 1 ~ "Left High-school", 
+                               raeduc == 2 | raeduc == 3 | raeduc == 4 ~ "High-school graduate", 
+                               raeduc == 5 ~ "College and above"),
+               # Select observations from 2006 to 2016
+               year = case_when(wave == 8  ~ 2006,
+                                wave == 9  ~ 2008,
+                                wave == 10 ~ 2010,
+                                wave == 11 ~ 2012,
+                                wave == 12 ~ 2014,
+                                wave == 13 ~ 2016,
+                                wave == 14 ~ 2018 ),
+              age_group = if_else(age < 65, "Less than 65", "65 and Over"),
+              age_65 = age - 65,
+              lngait = if_else(age < 65, NA_real_, lngait)) 
+
+data$race = relevel(factor(data$race), ref ="White")
+data$edu = relevel(factor(data$edu), ref ="College and above")
+
+# Select samples between 40-90 years old
+biomarkers_adj = c("a1c_adj", "lncysc_adj", "lncrp_adj", "dbp", "peakflow", 
+                   "waist", "balancetest","lngait", "grip")
+
+data <- data %>% filter(year <= 2016) %>%
+  filter(rowSums(is.na(across(all_of(biomarkers_adj)))) < length(biomarkers_adj))%>%
+  group_by(hhidpn) %>%
+  mutate(age_baseline = age[which.min(wave)]) %>% 
+  filter(age_baseline >= 40 & age_baseline <= 90) %>% 
+  select(-age_baseline)
+```
+
+### Process Biomarker Data
+```{r include=FALSE}
+# Biomarkers for Pace of Aging
+biomarkers_blyr = c("blyr_a1c_adj", "blyr_lncysc_adj", "blyr_lncrp_adj",
+                    "blyr_dbp", "blyr_peakflow", "blyr_waist", "blyr_balancetest",
+                    "blyr_lngait",  "blyr_grip")
+
+biomarkers_agebaseline <- c("baseline_age_a1c_adj","baseline_age_lncysc_adj",
+                            "baseline_age_lncrp_adj","baseline_age_dbp",
+                            "baseline_age_peakflow","baseline_age_waist",
+                            "baseline_age_lngait","baseline_age_balancetest",
+                            "baseline_age_grip")
+
+# Create count number, Baseline_year and Baseline_age variables for each biomarker
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(grip)),
+         blyr_grip = ifelse(ValidCounts > 1 & !is.na(grip), year[which(!is.na(grip))[1]], NA),
+         baseline_age_grip = ifelse(ValidCounts > 1 & !is.na(grip), (age[which(!is.na(grip))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(lngait)),
+         blyr_lngait = ifelse(ValidCounts > 1 & !is.na(lngait), year[which(!is.na(lngait))[1]], NA),
+         baseline_age_lngait = ifelse(ValidCounts > 1 & !is.na(lngait), (age[which(!is.na(lngait))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(balancetest)),
+         blyr_balancetest = ifelse(ValidCounts > 1 & !is.na(balancetest), year[which(!is.na(balancetest))[1]], NA),
+         baseline_age_balancetest = ifelse(ValidCounts > 1 & !is.na(balancetest), (age[which(!is.na(balancetest))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(waist)),
+         blyr_waist = ifelse(ValidCounts > 1 & !is.na(waist), year[which(!is.na(waist))[1]], NA),
+         baseline_age_waist = ifelse(ValidCounts > 1 & !is.na(waist), (age[which(!is.na(waist))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(peakflow)),
+         blyr_peakflow = ifelse(ValidCounts > 1 & !is.na(peakflow), year[which(!is.na(peakflow))[1]], NA),
+         baseline_age_peakflow = ifelse(ValidCounts > 1 & !is.na(peakflow), (age[which(!is.na(peakflow))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(dbp)),
+         blyr_dbp = ifelse(ValidCounts > 1 & !is.na(dbp), year[which(!is.na(dbp))[1]], NA),
+         baseline_age_dbp = ifelse(ValidCounts > 1 & !is.na(dbp), (age[which(!is.na(dbp))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(lncrp_adj)),
+         blyr_lncrp_adj = ifelse(ValidCounts > 1 & !is.na(lncrp_adj), year[which(!is.na(lncrp_adj))[1]], NA),
+         baseline_age_lncrp_adj = ifelse(ValidCounts > 1 & !is.na(lncrp_adj), (age[which(!is.na(lncrp_adj))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(lncysc_adj)),
+         blyr_lncysc_adj = ifelse(ValidCounts > 1 & !is.na(lncysc_adj), year[which(!is.na(lncysc_adj))[1]], NA),
+         baseline_age_lncysc_adj = ifelse(ValidCounts > 1 & !is.na(lncysc_adj), (age[which(!is.na(lncysc_adj))[1]]-65)/5, NA))
+
+data <- data %>% 
+  group_by(hhidpn) %>%
+  mutate(ValidCounts = sum(!is.na(a1c_adj)),
+         blyr_a1c_adj = ifelse(ValidCounts > 1 & !is.na(a1c_adj), year[which(!is.na(a1c_adj))[1]], NA),
+         baseline_age_a1c_adj = ifelse(ValidCounts > 1 & !is.na(a1c_adj), (age[which(!is.na(a1c_adj))[1]]-65)/5, NA))
+
+# Compute the baseline year and follow-up time variables for cohort inclusion 
+data <- data %>% 
+  mutate(year_baseline =  pmin(blyr_a1c_adj,blyr_lncysc_adj,blyr_lncrp_adj,
+                               blyr_dbp,blyr_peakflow,blyr_waist,blyr_lngait,
+                               blyr_balancetest,blyr_grip,na.rm = TRUE),
+         year = as.numeric(year), age = as.numeric(age)) %>% 
+  group_by(hhidpn) %>% mutate(year_baseline = min(year_baseline,na.rm = TRUE)) %>%
+  ungroup() %>% mutate(time = year - year_baseline) %>% filter(year >= year_baseline) 
+
+# Filter out samples not meet the criteria (>=6 biomarker & >=1 in each composite)
+criteria <- data %>% 
+  mutate(hhidpn = as.character(hhidpn)) %>% 
+  select("hhidpn", "time", "age", "a1c_adj", "lncysc_adj", "lncrp_adj", "dbp", 
+         "peakflow", "waist", "balancetest", "lngait", "grip") %>% 
+  mutate(waist = ifelse(age <= 65, waist, NA)) %>% 
+  group_by(hhidpn) %>% 
+  summarise(across(c("a1c_adj", "lncysc_adj", "lncrp_adj", "dbp", 
+                     "peakflow", "waist", "balancetest", "lngait", "grip"), 
+                   ~ sum(!is.na(.)), .names = "count_{col}")) %>% 
+  ungroup() %>% 
+  mutate(valid_biomarker_count = rowSums(across(starts_with("count_")) >= 2),
+         valid_a_count = rowSums(across(matches("count_(a1c|lncrp|lncysc)")) >= 2),
+         valid_b_count = rowSums(across(matches("count_(dbp|peakflow|waist)")) >= 2),
+         valid_c_count = rowSums(across(matches("count_(balancetest|lngait|grip)")) >= 2),
+         eligible = ifelse(valid_biomarker_count >= 6 & valid_a_count >= 1 &
+                           valid_b_count >= 1 & valid_c_count >= 1, 1, 0))
+
+data <- data %>%
+  inner_join(criteria %>% filter(eligible == 1) %>%
+            mutate(hhidpn = as.numeric(hhidpn)), by = "hhidpn")
+```
+
+```{r include=FALSE}
+#### Sample descriptive table (Supplemental Table 1 B)
+data %>% filter(year == year_baseline) %>% filter(age >= 40) %>%
+    furniture::table1("Age" = age, "Sex" = sex, "Race/Ethnicity" = race, 
+                      "Baseline" = as.factor(year_baseline), 
+                      "Education" = edu, caption = "Demographic characteristics", 
+                      output = 'text', float = "h", booktabs = T, na.rm = F, digits = 2) 
+```
+
+```{r}
+## standardizing time and drop 1 observation
+data1 <- data %>% mutate(time = time/5, age_65 = age - 65) %>% 
+          filter( (year_baseline == 2006 & year == 2006) |
+                  (year_baseline == 2006 & year == 2010) |
+                  (year_baseline == 2006 & year == 2014) |         
+                  (year_baseline == 2008 & year == 2008) | 
+                  (year_baseline == 2008 & year == 2012) | 
+                  (year_baseline == 2008 & year == 2016) |
+                  (year_baseline == 2010 & year == 2010) |           
+                  (year_baseline == 2010 & year == 2014) |           
+                  (year_baseline == 2010 & year == 2018) |           
+                  (year_baseline == 2012 & year == 2012) |  
+                  (year_baseline == 2012 & year == 2016) ) %>% 
+         group_by(hhidpn) %>% 
+         mutate(age_baseline = (min(age_65,na.rm=TRUE))/5,
+                base_2010 = if_else(year_baseline == 2010, 1, 0),
+                base_2008 = if_else(year_baseline == 2008, 1, 0),
+                base_2012 = if_else(year_baseline == 2012, 1, 0)) %>% ungroup()
+
+mean_data <- data1 %>% filter(year == year_baseline) %>%
+  select(hhidpn, age_group, sex, age_baseline, time, biomarkers_adj, race) %>%
+  group_by(sex, age_group) %>%
+  summarize(mean_a1c = mean(a1c_adj, na.rm = T),
+    std_a1c = sd(a1c_adj, na.rm = T),
+    mean_crp = mean(lncrp_adj, na.rm = T),
+    std_crp = sd(lncrp_adj, na.rm = T),
+    mean_cysc = mean(lncysc_adj, na.rm = T),
+    std_cysc = sd(lncysc_adj, na.rm = T),
+    mean_dbp = mean(dbp, na.rm = T),
+    std_dbp = sd(dbp, na.rm = T),
+    mean_waist = mean(waist, na.rm = T),
+    std_waist = sd(waist, na.rm = T),
+    mean_grip = mean(grip, na.rm = T),
+    std_grip = sd(grip, na.rm = T),
+    mean_pflow = mean(peakflow, na.rm = T),
+    std_pflow = sd(peakflow, na.rm = T),
+    mean_btest = mean(balancetest, na.rm = T),
+    std_btest = sd(balancetest, na.rm = T))
+
+#### Biomarker descriptive table (Supplemental Table 3 A)
+calculate_summary <- function(data, item1, item2) {
+     result <- data %>% 
+             filter(year == get(item2)) %>% 
+             filter(age >= 40) %>% select(item1) %>% 
+             data.frame() %>% 
+             summarize(Sample_Size = n(),Mean = mean(get(item1),na.rm=T),SD = sd(get(item1),na.rm=T))
+     return(result)
+   }
+
+results <- list()
+for (i in 1:length(biomarkers_adj)) {
+  item1 <- biomarkers_adj[i]
+  item2 <- biomarkers_blyr[i]
+  result <- calculate_summary(data, item1, item2)
+  results[[paste(item1, item2, sep = "_")]] <- result }
+
+summary1 <- bind_cols(biomarkers_adj, bind_rows(results)) 
+
+#### Biomarker descriptive table be sex & age group (Supplemental Table 3 B)
+calculate_mean <- function(data, item1, item2) {
+     result <-  data %>% 
+             filter(year == get(item2)) %>% 
+             select(item1,hhidpn, sex, age_group, biomarkers_adj, race) %>% 
+             data.frame() %>% 
+             group_by(sex, age_group) %>%
+             summarize(Sample_Size = n(),Mean = mean(get(item1),na.rm=T),SD = sd(get(item1),na.rm=T)) 
+     return(result)
+}
+
+biomarkers_adj1 = c("a1c_adj", "lncrp_adj", "lncysc_adj", "dbp", "waist","grip","peakflow",   "balancetest")
+biomarkers_blyr1= c("blyr_a1c_adj", "blyr_lncrp_adj", "blyr_lncysc_adj", "blyr_dbp", "blyr_waist","blyr_grip","blyr_peakflow",  "blyr_balancetest")
+result_mean <- list()
+for (i in 1:length(biomarkers_adj1)) {
+  item1 <- biomarkers_adj1[i]
+  item2 <- biomarkers_blyr1[i]
+  result <- calculate_mean(data1, item1, item2)
+  result_mean[[item1]] <- result 
+}
+
+print(bind_cols(result_mean))
+mean_data1 <- bind_cols(result_mean)[, -c(seq(from = 6, to = 36, by = 5), seq(from = 7, to = 37, by = 5), c(seq(from = 3, to = 38, by = 5)))] 
+
+# gait speed
+mean_gait = data1 %>% filter(year == blyr_lngait) %>% 
+  mutate(age_ref = if_else(age < 75, "less than 75", "75 and over")) %>% 
+  select(hhidpn, age_ref, sex, age_baseline, time, biomarkers_adj, race) %>% 
+  group_by(sex, age_ref) %>% 
+  summarize(mean_gait = mean(lngait, na.rm = T), 
+    std_gait = sd(lngait, na.rm = T))
+
+data %>% filter(year == blyr_lngait) %>% 
+  group_by(hhidpn) %>%
+  ungroup() %>%
+  group_by(sex, age_group) %>%
+  furniture::table1("log Gait Speed" = lngait,output = "text", na.rm = F, digits = 2)
+
+```
+
+```{r}
+#### Ridge plot for period effect adjustment (Supplemental Figure 1 A)
+library(ggridges)
+adjustment <- function(item1, item2) {
+  # Biomarker measurement after adjusted for period effects  
+  check1 <- data1 %>% filter(year<=2014) %>% select(item1,year) %>% 
+                    mutate(adj="adjusted") %>% dplyr::rename(val=item1)
+  # Biomarker measurement before adjusted for period effects  
+  check2 <- data1 %>% filter(year<=2014) %>% select(item2,year) %>% 
+                    mutate(adj="original") %>% dplyr::rename(val=item2)
+  # Merge original and corrected data
+  check <- rbind(check1,check2)
+  # Ridge plot for different waves
+  ggplot(check,aes(y=as.factor(-year),
+    x=val,fill=factor(adj))) +
+    geom_density_ridges(alpha=0.3) +
+    scale_fill_manual(values = c("maroon","aquamarine4"),guide = FALSE)+ 
+    scale_y_discrete(expand = c(0.01, 0)) + labs(x = "", y = "Year",fill = "") +
+    scale_x_continuous(expand = c(0, 0)) + theme_bw()
+}
+
+biomarkers_adj = c("a1c_adj", "lncysc_adj", "lncrp_adj", "dbp", "peakflow", 
+                   "waist", "balancetest", "lngait", "grip")
+biomarkers_o_adj = c("O_a1c_adj", "O_lncysc_adj", "O_lncrp_adj", "O_dbp", 
+                     "O_peakflow", "O_waist", "O_balancetest","O_lngait", "O_grip")
+
+results_adj <- list()
+for (i in 1:length(biomarkers_adj)) {
+  item1 <- biomarkers_adj[i]
+  item2 <- biomarkers_o_adj[i]
+  result <- adjustment(item1, item2)
+  results_adj[[item1]] <- result}
+plot_grid(plotlist = results_adj,labels = c("HbA1c", "log Cystatin-C", 
+                                            "log C-reactive Protein", "DBP", 
+                                            "Peakflow", "Waist Circ.", "Balance Test", 
+                                            "log Gait Speed" ,"Grip Strength"), 
+          label_size = 10, ncol = 3)
+mean_gait1 = data1 %>% filter(year == blyr_lngait) %>% 
+  mutate(age_ref = if_else(age < 75, "less than 75", "75 and over")) %>% 
+  select(hhidpn, age_ref, sex, age_baseline, time, biomarkers_adj, race) %>% 
+  group_by(sex, age_ref) %>% 
+  summarize(mean_gait = mean(lngait, na.rm = T), 
+    std_gait = sd(lngait, na.rm = T))
+```
+
+# Linear Mixed Effect Models
+```{r include=FALSE}
+#### 
+colnames(mean_data1) <- names(mean_data)
+exclusion = data1 %>% 
+  select(hhidpn, year, age, age_group, year_baseline, base_2008, base_2010, base_2012, sex, age_baseline, time, biomarkers_adj, biomarkers_blyr, biomarkers_agebaseline) %>%
+  group_by(hhidpn) %>% 
+  filter(n() > 1) %>% 
+  ungroup() %>% 
+  mutate(a1c_std = if_else(sex == "Male", (a1c_adj - mean_data1$mean_a1c[4])/mean_data1$std_a1c[4], (a1c_adj - mean_data1$mean_a1c[2])/mean_data1$std_a1c[2]),
+         cysc_std = if_else(sex == "Male", (lncysc_adj - mean_data1$mean_cysc[4])/mean_data1$std_cysc[4], (lncysc_adj - mean_data1$mean_cysc[2])/mean_data1$std_cysc[2]),
+         crp_std = if_else(sex == "Male", (lncrp_adj - mean_data1$mean_crp[4])/mean_data1$std_crp[4], (lncrp_adj - mean_data1$mean_crp[2])/mean_data1$std_crp[2]),
+         dbp_std = if_else(sex == "Male", (dbp - mean_data1$mean_dbp[4])/mean_data1$std_dbp[4], (dbp - mean_data1$mean_dbp[2])/mean_data1$std_dbp[2]),
+         waist_std = if_else(sex == "Male", (waist - mean_data1$mean_waist[4])/mean_data1$std_waist[4], (waist - mean_data1$mean_waist[2])/mean_data1$std_waist[2]),
+         gait_std = if_else(sex == "Male", (lngait - mean_gait1$mean_gait[4])/mean_gait1$std_gait[4], (lngait - mean_gait1$mean_gait[2])/mean_gait1$std_gait[2]),
+         grip_std = if_else(sex == "Male", (grip - mean_data1$mean_grip[4])/mean_data1$std_grip[4], (grip - mean_data1$mean_grip[2])/mean_data1$std_grip[2]),
+         pflow_std = if_else(sex == "Male", (peakflow - mean_data1$mean_pflow[4])/mean_data1$std_pflow[4], (peakflow - mean_data1$mean_pflow[2])/mean_data1$std_pflow[2]), 
+         btest_std = if_else(sex == "Male", (balancetest - mean_data1$mean_btest[4])/mean_data1$std_btest[4], (balancetest - mean_data1$mean_btest[2])/mean_data1$std_btest[2]),
+         dbp_std = dbp_std*-1,
+         pflow_std = pflow_std*-1,
+         btest_std = btest_std*-1,
+         grip_std = grip_std*-1)
+
+biomarkers2 = c("a1c_std", "cysc_std", "crp_std", "dbp_std", "pflow_std", "waist_std", "gait_std", "btest_std", "grip_std")
+
+males = exclusion %>% filter(sex == "Male")
+females = exclusion %>% filter(sex == "Female")
+exclusion$id <- exclusion$hhidpn
+
+############## males
+output_males = list()
+for (k in 1:length(biomarkers2)) {
+  i <- biomarkers2[k]
+  j <- biomarkers_agebaseline[k]
+  output_males[[k]] = lmer(get(i) ~ bs(get(j), df = 4) + base_2008 + base_2010 + 
+                             base_2012 + time + time:get(j) + (time | hhidpn), 
+                             control = lmerControl(optimizer = 'Nelder_Mead'),
+                    data = males %>% drop_na(i) %>% group_by(hhidpn) %>% filter(n() > 1) %>% ungroup())
+}
+
+names(output_males) <- biomarkers2
+fixed_effects = lapply(output_males, fixef)
+lmer <- lapply(output_males, function(x) data.frame(ranef(x)$hhidpn))
+lmer <- do.call("rbind", lmer)
+lmer$biomarker_id <- row.names(lmer)
+
+intercepts_males = as_tibble(lmer) %>% 
+  separate(biomarker_id, c("biomarker", "type", "id")) %>%
+  pivot_wider(id_cols = id, names_from =  biomarker, values_from = c(X.Intercept., time)) %>% 
+  dplyr::rename(a1c_rint = X.Intercept._a1c,
+         cysc_rint = X.Intercept._cysc, 
+         crp_rint = X.Intercept._crp,
+         dbp_rint = X.Intercept._dbp,
+         waist_rint = X.Intercept._waist,
+         gait_rint = X.Intercept._gait,
+         grip_rint = X.Intercept._grip,
+         pflow_rint = X.Intercept._pflow,
+         btest_rint = X.Intercept._btest) %>% 
+  dplyr::rename(a1c_ran = time_a1c,
+         cysc_ran = time_cysc, 
+         crp_ran = time_crp,
+         dbp_ran = time_dbp,
+         waist_ran = time_waist,
+         gait_ran = time_gait,
+         grip_ran = time_grip,
+         pflow_ran = time_pflow,
+         btest_ran = time_btest) %>% 
+  mutate(a1c_fint = fixed_effects$a1c_std[[1]],
+         cysc_fint = fixed_effects$cysc_std[[1]],
+         crp_fint = fixed_effects$crp_std[[1]],
+         dbp_fint = fixed_effects$dbp_std[[1]],
+         waist_fint = fixed_effects$waist_std[[1]],
+         gait_fint = fixed_effects$gait_std[[1]],
+         grip_fint = fixed_effects$grip_std[[1]],
+         pflow_fint = fixed_effects$pflow_std[[1]],
+         btest_fint = fixed_effects$btest_std[[1]])
+
+############## females
+
+output_females = list()
+
+for (k in 1:length(biomarkers2)) {
+  i <- biomarkers2[k]
+  j <- biomarkers_agebaseline[k]
+  output_females[[i]] = lmer(get(i) ~ bs(get(j), df = 4) + base_2008 + base_2010 + 
+                               base_2012 + time + time:get(j) + (time | hhidpn), 
+                    control = lmerControl(optimizer = 'Nelder_Mead'),
+                    data = females %>% drop_na(i) %>% group_by(hhidpn) %>% filter(n() > 1) %>% ungroup())
+}
+names(output_females) <- biomarkers2
+fixed_effects = lapply(output_females, fixef)
+lmer <- lapply(output_females, function(x) data.frame(ranef(x)$hhidpn))
+lmer <- do.call("rbind", lmer)
+lmer$biomarker_id <- row.names(lmer)
+
+intercepts_females = as_tibble(lmer) %>% 
+  separate(biomarker_id, c("biomarker", "type", "id")) %>%
+  pivot_wider(id_cols = id, names_from =  biomarker, values_from = c(X.Intercept., time)) %>% 
+  dplyr::rename(a1c_rint = X.Intercept._a1c,
+         cysc_rint = X.Intercept._cysc, 
+         crp_rint = X.Intercept._crp,
+         dbp_rint = X.Intercept._dbp,
+         waist_rint = X.Intercept._waist,
+         gait_rint = X.Intercept._gait,
+         grip_rint = X.Intercept._grip,
+         pflow_rint = X.Intercept._pflow,
+         btest_rint = X.Intercept._btest) %>% 
+  dplyr::rename(a1c_ran = time_a1c,
+         cysc_ran = time_cysc, 
+         crp_ran = time_crp,
+         dbp_ran = time_dbp,
+         waist_ran = time_waist,
+         gait_ran = time_gait,
+         grip_ran = time_grip,
+         pflow_ran = time_pflow,
+         btest_ran = time_btest) %>% 
+  mutate(a1c_fint = fixed_effects$a1c_std[[1]],
+         cysc_fint = fixed_effects$cysc_std[[1]],
+         crp_fint = fixed_effects$crp_std[[1]],
+         dbp_fint = fixed_effects$dbp_std[[1]],
+         waist_fint = fixed_effects$waist_std[[1]],
+         gait_fint = fixed_effects$gait_std[[1]],
+         grip_fint = fixed_effects$grip_std[[1]],
+         pflow_fint = fixed_effects$pflow_std[[1]],
+         btest_fint = fixed_effects$btest_std[[1]])
+
+intercepts = intercepts_males %>% full_join(intercepts_females)
+
+as.data.frame(lapply(output_males, VarCorr))[3,] %>% select(ends_with(".sdcor")) 
+as.data.frame(lapply(output_females, VarCorr))[3,] %>% select(ends_with(".sdcor"))
+
+```
+
+```{r include=FALSE}
+# Get fitted value from LME model
+x = lapply(output_males, fitted)
+x2 = lapply(output_females, fitted)
+males$id <- as.numeric(males$hhidpn)
+females$id <- as.numeric(females$hhidpn)
+
+males1 = males %>% filter(pflow_std != is.na(pflow_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_pflow = x$pflow_std) %>% 
+  select(id, year, time, sex, pflow_std, fitted_pflow, age) 
+
+males2 = males %>% filter(a1c_std != is.na(a1c_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_a1c = x$a1c_std) %>% 
+  select(id, year, time, sex, a1c_std, fitted_a1c, age) 
+
+males3 = males %>% filter(cysc_std != is.na(cysc_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_cysc = x$cysc_std) %>% 
+  select(id, year, time, sex, cysc_std, fitted_cysc, age) 
+
+males4 = males %>% filter(crp_std != is.na(crp_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_crp = x$crp_std) %>% 
+  select(id, year, time, sex, crp_std, fitted_crp, age) 
+
+males5 = males %>% filter(dbp_std != is.na(dbp_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_dbp = x$dbp_std) %>% 
+  select(id, year, time, sex, dbp_std, fitted_dbp, age) 
+
+males6 = males %>% filter(waist_std != is.na(waist_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_waist = x$waist_std) %>% 
+  select(id, year, time, sex, waist_std, fitted_waist, age) 
+
+males7 = males %>% filter(gait_std != is.na(gait_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_gait = x$gait_std) %>% 
+  select(id, year, time, sex, gait_std, fitted_gait, age) 
+
+males8 = males %>% filter(grip_std != is.na(grip_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_grip = x$grip_std) %>% 
+  select(id, year, time, sex, grip_std, fitted_grip, age) 
+
+males9 = males %>% filter(btest_std != is.na(btest_std)) %>%group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_btest = x$btest_std) %>% 
+  select(id, year, time, sex, btest_std, fitted_btest, age)
+
+fitted_males = males1 %>% full_join(males2) %>% full_join(males3) %>% 
+    full_join(males4) %>% full_join(males5) %>% full_join(males6) %>% 
+    full_join(males7) %>% full_join(males8) %>% full_join(males9) 
+
+females1 = females %>% filter(pflow_std != is.na(pflow_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_pflow = x2$pflow_std) %>% 
+  select(id, year, time, sex, pflow_std, fitted_pflow, age)
+
+females2 = females %>% filter(a1c_std != is.na(a1c_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_a1c = x2$a1c_std) %>% 
+  select(id, year, time, sex, a1c_std, fitted_a1c, age) 
+
+females3 = females %>% filter(cysc_std != is.na(cysc_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_cysc = x2$cysc_std) %>% 
+  select(id, year, time, sex, cysc_std, fitted_cysc, age) 
+
+females4 = females %>% filter(crp_std != is.na(crp_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_crp = x2$crp_std) %>% 
+  select(id, year, time, sex, crp_std, fitted_crp, age)
+
+females5 = females %>% filter(dbp_std != is.na(dbp_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_dbp = x2$dbp_std) %>% 
+  select(id, year, time, sex, dbp_std, fitted_dbp, age)
+
+females6 = females %>% filter(waist_std != is.na(waist_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_waist = x2$waist_std) %>% 
+  select(id, year, time, sex, waist_std, fitted_waist, age) 
+
+females7 = females %>% filter(gait_std != is.na(gait_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_gait = x2$gait_std) %>% 
+  select(id, year, time, sex, gait_std, fitted_gait, age) 
+
+females8 = females %>% filter(grip_std != is.na(grip_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_grip = x2$grip_std) %>% 
+  select(id, year, time, sex, grip_std, fitted_grip, age) 
+
+females9 = females %>% filter(btest_std != is.na(btest_std)) %>% group_by(id) %>% 
+  filter(n() > 1) %>% ungroup() %>% cbind(fitted_btest = x2$btest_std) %>% 
+  select(id, year, time, sex, btest_std, fitted_btest, age) 
+
+fitted_females = females1 %>% full_join(females2) %>% full_join(females3) %>% 
+       full_join(females4) %>% full_join(females5) %>% full_join(females6) %>% 
+       full_join(females7) %>% full_join(females8) %>% full_join(females9) 
+
+fitted_data = fitted_males %>% full_join(fitted_females)
+
+#### Bow Tie Plot (Supplemental Figure 2)
+plot_data = males1 %>% group_by(id) %>% filter(n() > 2) %>% ungroup() %>%
+  full_join(males2 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males3 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>%
+  full_join(males4 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males5 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males6 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males7 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males8 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(males9 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females1 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females2 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females3 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>%
+  full_join(females4 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females5 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females6 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females7 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females8 %>% group_by(id) %>% filter(n() > 2) %>% ungroup()) %>% 
+  full_join(females9 %>% group_by(id) %>% filter(n() > 2) %>% ungroup())
+
+fitted_vars = c("fitted_pflow", "fitted_a1c", "fitted_cysc", "fitted_crp", 
+                "fitted_dbp", "fitted_waist", "fitted_gait", "fitted_grip", 
+                "fitted_btest")
+
+std_vars = c("pflow_std", "a1c_std", "cysc_std", "crp_std", "dbp_std", 
+             "waist_std", "gait_std", "grip_std", "btest_std")
+
+v = viridis(12)
+p = plasma(12)
+
+color_val = c(v[7], v[8], v[9], v[1], v[2], v[3], p[6], p[7], p[5])
+
+biomarkersname <- c("log Gait Speed","Grip Strength (rev)", "Balance Test (rev)", 
+                    "HbA1c", "log Cystatin C", "log C-reactive Protein",
+                    "Diastolic BP (rev)",  "Waist Circumference", "Peak Flow (rev)" )
+named_colors <- setNames(color_val, biomarkersname)
+
+plot_data %>% 
+  mutate(waist_std = if_else(age > 65, NA, waist_std)) %>%
+  select(id, time, std_vars) %>% 
+  mutate_at(vars(std_vars), scale) %>% 
+  mutate(time = time*5) %>% 
+  group_by(time) %>% 
+  summarise_at(vars(std_vars), mean, na.rm = TRUE) %>% 
+  pivot_longer(2:10, names_to = "Biomarker", values_to = "Mean") %>% 
+  arrange(desc(time), desc(Mean)) %>% 
+  mutate(Biomarker = case_when(Biomarker == "pflow_std" ~ "Peak Flow (rev)", 
+                               Biomarker == "a1c_std" ~ "HbA1c",
+                               Biomarker == "cysc_std" ~ "log Cystatin C", 
+                               Biomarker == "crp_std" ~ "log C-reactive Protein", 
+                               Biomarker == "dbp_std" ~ "Diastolic BP (rev)", 
+                               Biomarker == "waist_std" ~ "Waist Circumference", 
+                               Biomarker == "gait_std" ~ "log Gait Speed", 
+                               Biomarker == "grip_std" ~ "Grip Strength (rev)", 
+                               Biomarker == "btest_std" ~ "Balance Test (rev)"),
+         Biomarker = factor(Biomarker, levels = Biomarker[1:9])) %>% 
+  ggplot(aes(x = time, y = Mean, color = Biomarker)) + 
+  geom_point(alpha = 0.7) + 
+  geom_line(alpha = 0.7) + 
+  scale_color_manual(values = named_colors) + 
+  scale_x_continuous(breaks = c(0,4,8)) + 
+  scale_y_continuous(limits = c(-0.4, 0.4), 
+                     breaks = c(-0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4)) +
+  theme_minimal() + 
+  labs(title = "Actual Values (3+) - Standardized", 
+       x = "Time (years)") 
+
+```
+
+# Measuring Pace of Aging  
+```{r echo=FALSE, message=FALSE}
+# Extract Slope 
+fitted_data$id <- as.numeric(fitted_data$id)
+intercepts$id <- as.numeric(intercepts$id)
+## Create Slope data
+slopes = fitted_data %>% 
+  select(id, age, year, time, sex, fitted_vars) %>%
+  mutate(fitted_waist = if_else(age > 65, NA, fitted_waist)) %>%
+  pivot_wider(id_cols = c("id", "sex"), names_from = time, values_from = fitted_vars) %>% 
+  ### Using Fitted value and follow-up time to calculate the Total Slopes
+  mutate(a1c_slope = (fitted_a1c_1.6 - fitted_a1c_0)/1.6,
+    cysc_slope = (fitted_cysc_1.6 - fitted_cysc_0)/1.6,
+    btest_slope = (fitted_btest_1.6 - fitted_btest_0)/1.6,
+    crp_slope = (fitted_crp_1.6 - fitted_crp_0)/1.6,
+    dbp_slope = (fitted_dbp_1.6 - fitted_dbp_0)/1.6,
+    grip_slope = (fitted_grip_1.6 - fitted_grip_0)/1.6,
+    gait_slope = (fitted_gait_1.6 - fitted_gait_0)/1.6,
+    pflow_slope = (fitted_pflow_1.6 - fitted_pflow_0)/1.6,
+    waist_slope = (fitted_waist_1.6 - fitted_waist_0)/1.6,
+    a1c_slope = if_else(is.na(a1c_slope), (fitted_a1c_0.8 - fitted_a1c_0)/0.8, a1c_slope),
+    cysc_slope = if_else(is.na(cysc_slope), (fitted_cysc_0.8 - fitted_cysc_0)/0.8, cysc_slope),
+    btest_slope = if_else(is.na(btest_slope), (fitted_btest_0.8 - fitted_btest_0)/0.8, btest_slope),
+    crp_slope = if_else(is.na(crp_slope), (fitted_crp_0.8 - fitted_crp_0)/0.8, crp_slope),
+    dbp_slope = if_else(is.na(dbp_slope), (fitted_dbp_0.8 - fitted_dbp_0)/0.8, dbp_slope),
+    grip_slope = if_else(is.na(grip_slope), (fitted_grip_0.8 - fitted_grip_0)/0.8, grip_slope),
+    gait_slope = if_else(is.na(gait_slope), (fitted_gait_0.8 - fitted_gait_0)/0.8, gait_slope),
+    pflow_slope = if_else(is.na(pflow_slope), (fitted_pflow_0.8 - fitted_pflow_0)/0.8, pflow_slope),
+    waist_slope = if_else(is.na(waist_slope), (fitted_waist_0.8 - fitted_waist_0)/0.8, waist_slope),
+    a1c_slope = if_else(is.na(a1c_slope), (fitted_a1c_1.6 - fitted_a1c_0.8)/0.8, a1c_slope),
+    cysc_slope = if_else(is.na(cysc_slope), (fitted_cysc_1.6 - fitted_cysc_0.8)/0.8, cysc_slope),
+    btest_slope = if_else(is.na(btest_slope), (fitted_btest_1.6 - fitted_btest_0.8)/0.8, btest_slope),
+    crp_slope = if_else(is.na(crp_slope), (fitted_crp_1.6 - fitted_crp_0.8)/0.8, crp_slope),
+    dbp_slope = if_else(is.na(dbp_slope), (fitted_dbp_1.6 - fitted_dbp_0.8)/0.8, dbp_slope),
+    grip_slope = if_else(is.na(grip_slope), (fitted_grip_1.6 - fitted_grip_0.8)/0.8, grip_slope),
+    gait_slope = if_else(is.na(gait_slope), (fitted_gait_1.6 - fitted_gait_0.8)/0.8, gait_slope),
+    pflow_slope = if_else(is.na(pflow_slope), (fitted_pflow_1.6 - fitted_pflow_0.8)/0.8, pflow_slope),
+    waist_slope = if_else(is.na(waist_slope), (fitted_waist_1.6 - fitted_waist_0.8)/0.8, waist_slope)) %>%
+  full_join(intercepts) %>% 
+  ### Get fixed effect by 
+  mutate(pflow_fix = pflow_slope - pflow_ran,
+    a1c_fix = a1c_slope - a1c_ran,
+    cysc_fix = cysc_slope - cysc_ran,
+    crp_fix = crp_slope - crp_ran,
+    dbp_fix = dbp_slope - dbp_ran,
+    waist_fix = waist_slope - waist_ran,
+    gait_fix = gait_slope - gait_ran, 
+    grip_fix = grip_slope - grip_ran,
+    btest_fix = btest_slope - btest_ran) %>% 
+  group_by(sex) %>% 
+  ### Winsorize individual differences of random effect to reduce extreme values  
+  mutate(a1c_ran = Winsorize(a1c_ran, minval = mean(a1c_ran, na.rm = T) - 5 * sd(a1c_ran, na.rm = T),
+                             maxval = mean(a1c_ran, na.rm = T) + 5 * sd(a1c_ran, na.rm = T)),
+    cysc_ran = Winsorize(cysc_ran, minval = mean(cysc_ran, na.rm = T) - 5 * sd(cysc_ran, na.rm = T), 
+                         maxval = mean(cysc_ran, na.rm = T) + 5 * sd(cysc_ran, na.rm = T)),
+    crp_ran = Winsorize(crp_ran, minval = mean(crp_ran, na.rm = T) - 5 * sd(crp_ran, na.rm = T), 
+                        maxval = mean(crp_ran, na.rm = T) + 5 * sd(crp_ran, na.rm = T)),
+    dbp_ran = Winsorize(dbp_ran, minval = mean(dbp_ran, na.rm = T) - 5 * sd(dbp_ran, na.rm = T), 
+                        maxval = mean(dbp_ran, na.rm = T) + 5 * sd(dbp_ran, na.rm = T)),
+    waist_ran = Winsorize(waist_ran, minval = mean(waist_ran, na.rm = T) - 5 * sd(waist_ran, na.rm = T), 
+                          maxval = mean(waist_ran, na.rm = T) + 5 * sd(waist_ran, na.rm = T)),
+    gait_ran = Winsorize(gait_ran, minval = mean(gait_ran, na.rm = T) - 5 * sd(gait_ran, na.rm = T), 
+                         maxval = mean(gait_ran, na.rm = T) + 5 * sd(gait_ran, na.rm = T)),
+    grip_ran = Winsorize(grip_ran, minval = mean(grip_ran, na.rm = T) - 5 * sd(grip_ran, na.rm = T), 
+                         maxval = mean(grip_ran, na.rm = T) + 5 * sd(grip_ran, na.rm = T)),
+    btest_ran = Winsorize(btest_ran, minval = mean(btest_ran, na.rm = T) - 5 * sd(btest_ran, na.rm = T), 
+                          maxval = mean(btest_ran, na.rm = T) + 5 * sd(btest_ran, na.rm = T)),
+    pflow_ran = Winsorize(pflow_ran, minval = mean(pflow_ran, na.rm = T) - 5 * sd(pflow_ran, na.rm = T), 
+                          maxval = mean(pflow_ran, na.rm = T) + 5 * sd(pflow_ran, na.rm = T)),
+    a1c_rint = Winsorize(a1c_rint, minval = mean(a1c_rint, na.rm = T) - 5 * sd(a1c_rint, na.rm = T), 
+                         maxval = mean(a1c_rint, na.rm = T) + 5 * sd(a1c_rint, na.rm = T)),
+    cysc_rint = Winsorize(cysc_rint, minval = mean(cysc_rint, na.rm = T) - 5 * sd(cysc_rint, na.rm = T), 
+                          maxval = mean(cysc_rint, na.rm = T) + 5 * sd(cysc_rint, na.rm = T)),
+    crp_rint = Winsorize(crp_rint, minval = mean(crp_rint, na.rm = T) - 5 * sd(crp_rint, na.rm = T), 
+                         maxval = mean(crp_rint, na.rm = T) + 5 * sd(crp_rint, na.rm = T)),
+    dbp_rint = Winsorize(dbp_rint, minval = mean(dbp_rint, na.rm = T) - 5 * sd(dbp_rint, na.rm = T), 
+                         maxval = mean(dbp_rint, na.rm = T) + 5 * sd(dbp_rint, na.rm = T)),
+    waist_rint = Winsorize(waist_rint, 
+                           minval = mean(waist_rint, na.rm = T) - 5 * sd(waist_rint, na.rm = T), 
+                           maxval = mean(waist_rint, na.rm = T) + 5 * sd(waist_rint, na.rm = T)),
+    gait_rint = Winsorize(gait_rint, minval = mean(gait_rint, na.rm = T) - 5 * sd(gait_rint, na.rm = T), 
+                          maxval = mean(gait_rint, na.rm = T) + 5 * sd(gait_rint, na.rm = T)),
+    grip_rint = Winsorize(grip_rint, minval = mean(grip_rint, na.rm = T) - 5 * sd(grip_rint, na.rm = T), 
+                          maxval = mean(grip_rint, na.rm = T) + 5 * sd(grip_rint, na.rm = T)),
+    btest_rint = Winsorize(btest_rint, 
+                           minval = mean(btest_rint, na.rm = T) - 5 * sd(btest_rint, na.rm = T), 
+                           maxval = mean(btest_rint, na.rm = T) + 5 * sd(btest_rint, na.rm = T)),
+    pflow_rint = Winsorize(pflow_rint, 
+                           minval = mean(pflow_rint, na.rm = T) - 5 * sd(pflow_rint, na.rm = T), 
+                           maxval = mean(pflow_rint, na.rm = T) + 5 * sd(pflow_rint, na.rm = T)),
+    ### Recompute the total slope 
+    pflow_slope = pflow_fix + pflow_ran,
+    a1c_slope = a1c_fix + a1c_ran,
+    cysc_slope = cysc_fix + cysc_ran,
+    crp_slope = crp_fix + crp_ran,
+    dbp_slope = dbp_fix + dbp_ran,
+    waist_slope = waist_fix + waist_ran,
+    gait_slope = gait_fix + gait_ran, 
+    grip_slope = grip_fix + grip_ran,
+    btest_slope = btest_fix + btest_ran,
+    pflow_tint = pflow_fint + pflow_rint,
+    a1c_tint = a1c_fint + a1c_rint,
+    cysc_tint = cysc_fint + cysc_rint,
+    crp_tint = crp_fint + crp_rint,
+    dbp_tint = dbp_fint + dbp_rint,
+    waist_tint = waist_fint + waist_rint,
+    gait_tint = gait_fint + gait_rint, 
+    grip_tint = grip_fint + grip_rint,
+    btest_tint = btest_fint + btest_rint) %>%
+  ungroup() %>% 
+  select(-starts_with("fitted_"))
+
+# Merge with additional covariates  
+slopes = data1 %>% mutate(id = as.character(hhidpn))%>% 
+  group_by(id) %>% 
+  mutate(follow_up_time = max(time,na.rm=T)) %>% 
+  filter(age == min(age,na.rm = T)) %>% 
+  select(id, sex, age, year_baseline, race, age_baseline, edu, region, follow_up_time) %>% 
+  mutate(base_2010 = if_else(year_baseline == 2010, 1, 0),
+         base_2008 = if_else(year_baseline == 2008, 1, 0),
+         base_2012 = if_else(year_baseline == 2012, 1, 0)) %>%
+  inner_join(slopes %>% mutate(id = as.character(id))) %>% 
+  ungroup() %>% 
+  rowwise %>% 
+  ## Generate a summary of slopes for each biomarker  
+  mutate(composite_int = mean(c(a1c_tint, cysc_tint, crp_tint, dbp_tint, waist_tint, 
+                                gait_tint, grip_tint, pflow_tint, btest_tint), na.rm = TRUE),
+         composite_std = if_else(age <= 65, mean(c(a1c_slope, cysc_slope, crp_slope, 
+                                                   dbp_slope, gait_slope, grip_slope, 
+                                                   pflow_slope, btest_slope,waist_slope), 
+                                                 na.rm = TRUE),
+                                 mean(c(a1c_slope, cysc_slope, crp_slope, dbp_slope, 
+                                        gait_slope, grip_slope, pflow_slope, 
+                                        btest_slope), na.rm = TRUE)),
+         ### Construct a composite measure of blood biomarkers
+         composite_a = mean(c(a1c_slope, cysc_slope, crp_slope), na.rm = T),
+         ### Construct a composite measure of physical assessments 
+         composite_b = if_else(age <= 65, mean(c(dbp_slope, pflow_slope, 
+                                                 waist_slope), na.rm = TRUE), 
+                               mean(c(dbp_slope, pflow_slope), na.rm = TRUE)),
+         ### Construct a composite measure of functional tests
+         composite_c = mean(c(gait_slope, grip_slope, btest_slope), na.rm = T), 
+         ### Adjust for sex differences in standardization
+         composite_scaled = if_else(sex == "Male", composite_std/0.1308175, 
+                                    composite_std/0.114592)) %>% ungroup() 
+
+# Summary table of Pace of Aging (Supplemental Table 5)
+calculate_mean_ci_table <- function(data, measure_vars) {
+  results <- data %>%
+    group_by(sex) %>%
+    summarise(across(all_of(measure_vars), 
+                     list(mean = ~round(mean(.x, na.rm = TRUE),2),
+           lower_ci = ~round(mean(.x, na.rm = TRUE) - qt(0.975, df = sum(!is.na(.x)) - 1) * sd(.x, na.rm = TRUE) / sqrt(n()),2),
+           upper_ci = ~round(mean(.x, na.rm = TRUE) + qt(0.975, df = sum(!is.na(.x)) - 1) * sd(.x, na.rm = TRUE) / sqrt(n()),2)), .names = "{.col}_{.fn}"))  %>%
+    pivot_longer(
+      cols = -sex,
+      names_to = c("measure", "statistic"),
+      names_pattern = "(.*)_(.*)"
+    ) %>%
+    pivot_wider(names_from = statistic, values_from = value)
+  return(results)
+}
+
+calculate_mean_ci_table(slopes %>% 
+        mutate(composite_65 = case_when(age_baseline <= 0 ~ composite_scaled,
+                                        age_baseline > 0 ~ NA)),
+                   c("a1c_slope", "cysc_slope", "btest_slope", "crp_slope", 
+                     "dbp_slope", "grip_slope", "gait_slope", "pflow_slope", 
+                     "waist_slope", "composite_a", "composite_b", "composite_c", 
+                     "composite_scaled","composite_65"))
+```
+
+
+```{r}
+# Correlations among biomarker slopes (Supplemental Figure 4)
+make_plot = function(axis_type, comp_df, dat, label,
+                     scatter_cols, cor_zlim, white_borders = FALSE) {
+
+  num_vars = length(levels(comp_df$x_var))
+
+  ind_mat = matrix(
+    seq(1, (1 + num_vars)^2),
+    nrow = 1 + num_vars,
+    ncol = 1 + num_vars
+  )
+
+  index_df = get_indexes(comp_df, ind_mat, num_vars, dat)
+  index_df$x_var = factor(index_df$x_var, levels=unique(index_df$x_var))
+  index_df$y_var = factor(index_df$y_var, levels=unique(index_df$y_var))
+
+  data_lims = apply(dat, 2, range, na.rm = TRUE)
+
+  label_ind = diag(ind_mat)
+  names(label_ind) = levels(index_df$x_var)
+  names(label_ind)[length(label_ind)] = tail(levels(index_df$y_var), 1)
+
+  index_df$cor_cols = cor_colors(vals = index_df$cor, fix = 0, zlim = cor_zlim,
+                                 pos_cols = NULL, neg_cols = NULL, na_col = NULL)
+
+  layout_mat = ind_mat
+  layout_mat = cbind(rep(0, nrow(layout_mat)), layout_mat)
+  layout_mat = rbind(layout_mat, rep(0, ncol(layout_mat)))
+
+  layout_height = c(rep(10, nrow(layout_mat) - 1), 3)
+  layout_widths = c(3, rep(10, ncol(layout_mat) - 1))
+
+  par(cex = 1, mar = rep(.35, 4), oma = rep(0, 4),
+      xaxt = 'n', yaxt = 'n', lend = 1, ljoin = 1)
+
+  if (white_borders == TRUE) {
+    par(fg = 'white', col.axis = 'white')
+  }
+
+  layout(layout_mat, height = layout_height, widths = layout_widths)
+
+  for (plt_ind in ind_mat) {
+
+    if (plt_ind %in% index_df$scatter_ind) {
+      ind = index_df[which(index_df$scatter_ind %in% plt_ind), ]
+
+      xy_names = c(as.character(ind$x_var), as.character(ind$y_var))
+      cur_dat = dat[, xy_names]
+      names(cur_dat) = c("x", "y")
+
+      cur_axtype = c(axis_type[xy_names[1]], axis_type[xy_names[2]])
+      names(cur_axtype) = c("x", "y")
+
+      xlim = data_lims[, as.character(ind$x_var)]
+      ylim = data_lims[, as.character(ind$y_var)]
+      plot_scatter(dat = cur_dat, scatter_cols, lm_col = ind$cor_cols, axis_type = cur_axtype,
+                   xlim = xlim, ylim = ylim, x_axis = ind$x_axis, y_axis = ind$y_axis, plot_lm = TRUE)
+    }
+    else if (plt_ind %in% index_df$cor_ind) {
+      ind = index_df[which(index_df$cor_ind %in% plt_ind), ]
+      plot_cor(cor = ind$cor, col = ind$cor_col)
+    }
+
+    else if (plt_ind %in% label_ind) {
+      cur_lab = names(label_ind[which(label_ind %in% plt_ind)])
+      plot_label(lab = label[cur_lab])
+    }
+  }
+}
+
+get_indexes = function(comp_df, ind_mat, num_vars, dat) {
+
+  ret = data.frame()
+  cor_mat = cor(dat)
+
+  for (x_var in levels(comp_df$x_var)) {
+
+    cur_grp = comp_df[which(comp_df$x_var %in% x_var), c("x_var", "y_var")]
+    cur_grp$x_var = factor(cur_grp$x_var)
+    cur_grp$y_var = factor(cur_grp$y_var)
+
+    x_ind = which(levels(comp_df$x_var) %in% x_var)
+
+    if (x_ind == 1) {
+      y_axis = TRUE
+    }
+    else {
+      y_axis = FALSE
+    }
+
+    for (y_var in levels(cur_grp$y_var)) {
+      y_ind = which(levels(cur_grp$y_var) %in% y_var)
+
+      if (y_ind == nrow(cur_grp)) {
+        x_axis = TRUE
+      }
+      else {
+        x_axis = FALSE
+      }
+
+      num_skip = 1 + num_vars - nrow(cur_grp)
+
+      scatter_ind = ind_mat[num_skip + y_ind, x_ind]
+
+      num_vars = length(levels(comp_df$x_var))
+
+      cor_ind = ind_mat[x_ind, num_skip + y_ind]
+
+      cor = cor_mat[x_var, y_var]
+
+      ret = rbind(ret, data.frame(
+        "x_var" = x_var,
+        "y_var" = y_var,
+        "x_ind" = x_ind,
+        "y_ind" = y_ind,
+        "x_axis" = x_axis,
+        "y_axis" = y_axis,
+        "scatter_ind" = scatter_ind,
+        "cor_ind" = cor_ind,
+        "cor" = cor
+      ))
+    }
+  }
+  return(ret)
+}
+
+cor_colors = function(vals, fix = 0, zlim = cor_zlim,
+                      pos_cols = NULL, neg_cols = NULL, na_col = NULL) {
+  if (is.null(pos_cols)) {
+    pos_cols = colorRamp(rev(hcl.colors(9, palette = "Reds")))
+  }
+
+  if (is.null(neg_cols)) {
+    neg_cols = colorRamp(rev(hcl.colors(9, palette = "Blues")))
+  }
+
+  if (is.null(na_col)) {
+    na_col = "grey50"
+  }
+
+  colmap = function(val) {
+    if (val < zlim[1] | val > zlim[2]) {
+      ret = na_col
+    }
+    else if (val >= fix) {
+      ret = rgb(pos_cols(val / zlim[2]), maxColorValue = 255)
+    }
+    else {
+      ret = rgb(neg_cols(val / zlim[1]), maxColorValue = 255)
+    }
+    return(ret)
+  }
+  return(sapply(vals, colmap))
+}
+
+plot_scatter = function(dat, scatter_cols, lm_col, axis_type,
+                        xlim, ylim, x_axis = TRUE, y_axis = TRUE, plot_lm = TRUE) {
+  get_labels = function(x) {
+    plot_labels = seq(x[1], x[2], length.out = 100)
+    ret = quantile(plot_labels, seq(0, 1, .2))[c(-1, -6)]
+    return(round(ret, 1))
+  }
+
+  axis_cex = 1.2
+  dat$col = densCols(dat, y = NULL, nbin = 256, colramp = colorRampPalette(scatter_cols))
+  dat = dat[rev(order(dat$col)), ]
+
+  plot(dat$x, dat$y, col = dat$col, pch = 20, cex = 4, xlab = NA, ylab = NA,
+       xlim = xlim, ylim = ylim)
+
+  if (x_axis == TRUE) {
+    usr = par()$usr
+    round_d = ifelse(axis_type['x'] == 'int', 0, 1)
+    x_at = round(get_labels(usr[1:2]), round_d)
+    axis(1, at = x_at, xaxt = 's', labels = FALSE)
+    text(x = x_at, y = usr[3] - 0.1 * (usr[4] - usr[3]),
+         labels = format(x_at), srt = 45, adj = 1, font = 1, cex = axis_cex, xpd = NA)
+  }
+
+  if (y_axis == TRUE) {
+    round_d = ifelse(axis_type['y'] == 'int', 0, 1)
+    y_at = round(get_labels(par()$usr[3:4]), round_d)
+    axis(side = 2, at = y_at, labels = y_at, yaxt = 's', cex.axis = axis_cex, las=2)
+  }
+
+  if (plot_lm == TRUE) {
+    abline(lm(y ~ x, dat), col = "#000000", lty = 2, lwd = 2.001)
+    abline(lm(y ~ x, dat), col = lm_col, lty = 2, lwd = 2)
+  }
+  box()
+}
+
+plot_cor = function (cor, col) {
+
+  plt_cor = round(cor, 2)
+
+  if (plt_cor == 0) {
+    plt_cor = abs(plt_cor)
+  }
+
+  plot(0, 0, type = 'n', main = '', xlab = '', ylab = '', xaxt = 'n', yaxt = 'n')
+  rect(-2, -2, 2, 2, col = col, border = NA)
+  text(0, 0, sprintf("%.02f", plt_cor), cex = 3, col = "black")
+  box()
+}
+
+plot_label = function (lab) {
+  plot(0, 0, type = 'n', main = '', xlab = '', ylab = '', xaxt = 'n', yaxt = 'n')
+  text(0, 0, lab, cex = 1.5, col = "black")
+  box()
+
+}
+
+plot_baa = function(data, agevar, label, axis_type) {
+
+  # Vector of colors for scatter plot DensCols
+  scatter_cols = rev(hcl.colors(9, palette = "Blues"))[-(1:3)]
+
+  # Correlation zlims
+  cor_zlim = c(-1, 1)
+
+  # Use complete dataset
+  dat = data %>%
+    select(all_of(agevar)) %>%
+    na.omit() %>%
+    as.data.frame()
+
+  # Create column-wise comparisons
+  comp_df = data.frame(t(combn(names(label), 2)))
+  names(comp_df) = c("x_var", "y_var")
+  comp_df$x_var = factor(comp_df$x_var, levels=unique(comp_df$x_var))
+  comp_df$y_var = factor(comp_df$y_var, levels=unique(comp_df$y_var))
+
+
+  # Make plots for both filenames
+  make_plot(axis_type, comp_df, dat, label,
+            scatter_cols, cor_zlim,
+            white_borders=FALSE)
+}
+
+# Set labels
+agevar = c("composite_std", "composite_a","composite_b","composite_c")
+
+label = c("composite_std" = "Pace of Aging \n (HRS)",
+         "composite_a" = "Blood Biomarkers \n Composite",
+         "composite_b" = "Physical \n Assessments\n Composite",
+         "composite_c" = "Functional Tests \n Composite")
+
+axis_type = c("composite_std" = "float",
+             "composite_a" = "float",
+             "composite_b" = "float",
+             "composite_c" = "float")
+
+plot_baa(slopes, agevar, label, axis_type)
+
+
+# Correlations among slopes of biomarker (Supplemental Figure 3)
+biomarkers_slope9 <- c("a1c_slope", "crp_slope", "cysc_slope", "dbp_slope", "waist_slope","pflow_slope", "grip_slope","btest_slope","gait_slope")
+
+## Correlations among full population
+o = slopes %>%
+  mutate(waist_slope = if_else(age > 65, NA, waist_slope)) %>%
+  select(biomarkers_slope9) %>% 
+  cor(use = "pairwise.complete.obs") 
+
+colnames(o) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ.","Peakflow", "Grip Strength", "Balance Test", "log Gait Speed")
+rownames(o) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ","Peakflow","Grip Strength", "Balance Test",  "log Gait Speed")
+
+pdf("C:/Users/pku/Desktop/Supp_Fig_3_Overall_HRS.pdf",width = 6, height = 4)
+o %>% corrplot(title = "Slopes: Overall", type = "lower", number.cex = 0.7, tl.cex = 0.75, number.digits = 2, diag = F, addCoef.col = "black", tl.srt = 45, method = "color", cl.pos = "n", mar = c(0,0,1,0))
+dev.off()
+
+## Correlations among males
+m = slopes %>%
+  mutate(waist_slope = if_else(age > 65, NA, waist_slope)) %>%
+  select(biomarkers_slope9) %>% 
+  cor(use = "pairwise.complete.obs") 
+
+colnames(m) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ.","Peakflow", "Grip Strength", "Balance Test", "log Gait Speed")
+rownames(m) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ","Peakflow","Grip Strength", "Balance Test",  "log Gait Speed")
+
+pdf("C:/Users/pku/Desktop/Supp_Fig_3_Male_HRS.pdf",width = 6, height = 4)
+m %>% corrplot(title = "Slopes: Male", type = "lower", number.cex = 0.7, tl.cex = 0.75, number.digits = 2, diag = F, addCoef.col = "black", tl.srt = 45, method = "color", cl.pos = "n", mar = c(0,0,1,0))
+dev.off()
+
+## Correlations among female
+f = slopes %>% filter(sex=="Female") %>% 
+  mutate(waist_slope = if_else(age > 65, NA, waist_slope)) %>%
+  select(biomarkers_slope9) %>% 
+  cor(use = "pairwise.complete.obs") 
+
+colnames(f) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ.","Peakflow", "Grip Strength", "Balance Test", "log Gait Speed")
+rownames(f) <- c("HbA1c", "log C-reactive Protein", "log Cystatin C", "DBP",  "Waist Circ","Peakflow","Grip Strength", "Balance Test",  "log Gait Speed")
+
+pdf("C:/Users/pku/Desktop/Supp_Fig_3_Women_HRS.pdf",width = 6, height = 4)
+f %>% corrplot(title = "Slopes: Female", type = "lower", number.cex = 0.7, tl.cex = 0.75, number.digits = 2, diag = F, addCoef.col = "black", tl.srt = 45, method = "color", cl.pos = "n", mar = c(0,0,1,0))
+dev.off()
+
+```
+
+```{r echo=FALSE }
+# PoA against baseline chronological ages (Figure 2 A)
+slopes %>% 
+  ggplot(aes(x = composite_scaled, fill = sex)) +
+  geom_histogram(alpha = 0.7, position = "identity") +
+  labs(x = "Pace of Aging", fill = "Sex", y = "Count") +
+  #scale_x_continuous(limits = c(0.7, 1.7)) + 
+  scale_fill_manual(values = c("maroon", "navy")) + 
+  theme_minimal() 
+
+PoA_scatter <-  slopes %>% 
+  ggplot(aes(x = age, y = composite_scaled, group = sex, color = sex)) +
+  geom_point(alpha = 0.7) +
+  stat_smooth(method = "lm") + 
+  scale_color_manual(values = c("#E4BACA","#AAAAD4")) + 
+  theme_minimal() + 
+  theme(legend.position="bottom")+
+  scale_x_continuous(limits = c(40, 90)) + 
+  labs(y = "Pace of Aging", x = "Age at Baseline (years)", color = "Sex") 
+
+ggMarginal(PoA_scatter, type = "histogram", groupColour = TRUE, groupFill = TRUE, alpha = 0.75, bins = 50)  
+
+# System integrity score (Figure 2 B)
+fitted_0 <- fitted_data %>% filter(time == 0) %>% 
+  select(id, fitted_waist,fitted_btest,fitted_btest,fitted_gait,fitted_grip,
+         fitted_dbp,fitted_pflow,fitted_a1c,fitted_cysc) %>% 
+  mutate(id = as.character(id))
+
+slopes1 = slopes %>% mutate(id = as.character(id)) %>% 
+  left_join(fitted_0,by="id") %>% mutate(age=age_baseline*5+65) %>% 
+  rowwise() %>%
+  mutate(fitted_waist = if_else(age > 65, NA, fitted_waist)) %>%
+  mutate(fitted_mean = mean(c(fitted_waist,fitted_btest,fitted_btest,fitted_gait,fitted_grip,fitted_dbp,fitted_pflow,fitted_a1c,fitted_cysc), na.rm = TRUE)) %>%
+  ungroup()
+
+change1 <- slopes1 %>% 
+  select(id, age, fitted_mean, sex) %>%
+  rename(fitted_poa = fitted_mean)
+
+change2 <- slopes1 %>% 
+     mutate(three_time_point = if_else(sum(!is.na(fitted_mean)) == 3 , 1, 0),
+            fitted_poa = if_else(three_time_point == 1, fitted_mean + 1.6 * composite_std, 
+                              fitted_mean + 0.8 * composite_std),
+            age_max = if_else(three_time_point == 1, age+8, age+4)) %>% 
+    select(id, age_max, fitted_poa, sex) %>% 
+    rename(age = age_max)
+
+change <- rbind(change1, change2)
+
+age_groups <- cut(slopes1$age, breaks = seq(40, 90, by = 10), right = FALSE, labels = FALSE)
+mean_slopes <- tapply(slopes1$composite_std, list(age_groups, slopes1$sex), mean, na.rm = TRUE)
+mean_int <- tapply(slopes1$fitted_mean, list(age_groups, slopes1$sex), mean, na.rm = TRUE)
+
+fittedmean_m <- data.frame(sex=rep("male",10),
+                           id=c(1,2,3,4,5,1,2,3,4,5),
+                           age = c(40,50,60,70,80,50,60,70,80,90),
+                           fitted_poa=c(mean_int[,2],mean_int[,2]+mean_slopes[,2]*2))
+fittedmean_f <- data.frame(sex=rep("female",10),
+                           id=c(6,7,8,9,10,6,7,8,9,10),
+                           age = c(40,50,60,70,80,50,60,70,80,90),
+                           fitted_poa=c(mean_int[,1],mean_int[,1]+mean_slopes[,1]*2))
+fittedmean <- rbind(fittedmean_m,fittedmean_f)
+
+ggplot()+ 
+  geom_line(data=change,aes(x = age, y = fitted_poa, colour = sex, group=factor(id)),linewidth=0.5,alpha=0.5)+ 
+  geom_line(data=fittedmean,aes(x = age, y = fitted_poa, colour = sex, group=factor(id)),linewidth=0.8)+ 
+  scale_colour_manual(values = c("#D31A35", "#E4BACA","#0000B8", "#AAAAD4"), guide = "none") + 
+  theme_bw()+
+  ylab("System integrity score (HRS)") +
+  xlab("Age") + scale_x_continuous(limits=c(40,95),breaks=seq(40, 90, 10)) + 
+  theme(legend.position="bottom")
+
+```
+
+```{r}
+# Race Difference
+## Age residualized
+slopes1 <- slopes %>% mutate(age1 = age-65) %>% 
+                      filter(race=="Black"| race=="Hispanic"|race== "White")
+model_res <- lm(composite_scaled ~ age1, data=slopes1)
+slopes1$residuals_poa <- residuals(model_res)+1.5387897    
+
+slopes1$race1 <- factor(slopes1$race, levels=c("Black","Hispanic", "White"))
+
+## Ridge Plot (Supplemental Figure 5 A)
+ggplot(slopes1, aes(x = residuals_poa, y = race1, fill = race1)) + 
+  geom_density_ridges(alpha = 0.7) +
+  stat_density_ridges(quantile_lines = TRUE, alpha = 0.75,
+                      quantiles = 2.)+
+  #scale_fill_manual(values = c("#FF9999","#AAAAD4"))+
+  scale_fill_manual(values = c( "maroon", "orange","navy"))+
+  scale_x_continuous(limits=c(-0.5,4),breaks=seq(0,3,1))+
+  theme_ridges() + 
+  theme(legend.position = "none")
+
+## Bar plot (Supplemental Figure 5 B)
+model_dis <- lm(residuals_poa ~ age_baseline + I(age_baseline^2)  + base_2008 + base_2010 + base_2012 + sex +race, data = slopes1)
+
+race_diff <- data.frame(outcome=c('White','Black', 'Hispanic'),
+                        estimate=c(0,0.229610, 0.080887),
+                        lower=c(NA, 0.19483518, 0.04163817),
+                        upper=c(NA,0.264385490, 0.120135166))
+ggplot(race_diff,aes(x =  outcome , y = estimate, color = outcome)) + 
+  geom_hline(yintercept=0, linetype=2,color = "darkgrey",size=0.6) + 
+  geom_point(shape=16,size=4 ) +
+  geom_errorbar(aes(x=outcome, ymin=lower, ymax=upper), position = position_dodge(0.9),
+                width = 0.1)+ 
+  ylab("Effect size") + xlab("") +
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(-0.01, 0.30)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_color_manual(values = c("Black" = "maroon", "Hispanic" = "orange")) +
+  scale_y_continuous( expand = c(0, 0), breaks=seq(0,0.25,0.05))  +
+  ggtitle("Difference in Pace of Aging vs. White Participants")
+```
+

@@ -1,0 +1,572 @@
+---
+title: "ELSA_Analysis"
+author: "HemingPei"
+date: "2025-03-11"
+output: html_document
+---
+# Regression
+```{r}
+# Health Outcome data
+Outcome <- read_dta("C:/Users/pku/Desktop/Outcome_5050_7 sept.dta")
+
+# "adlfive","iadlza"
+# "hibpe","diabe","cancre","lunge","hearte","stroke"
+# "tr20","ser7","bwc20"    
+
+check <- exclusion %>% select("idauniq","year","year_baseline","smokev","mbmi",
+                              "edyrs_e","educ_e","smoken") %>% 
+  filter(year == year_baseline) %>% mutate(year_baseline = case_when(
+                              year_baseline == "2004" ~ 2004,
+                              year_baseline == "2008" ~ 2008))
+
+Outcome <-  Outcome %>% 
+  select("idauniq","wave","adlfive","iadlza","hibpe","diabe","cancre","lunge",
+         "hearte","stroke", "tr20","ser7","bwc20") %>% 
+  mutate(year_baseline2 = case_when(
+    wave == 1 ~ 2002,
+    wave == 2 ~ 2004, 
+    wave == 3 ~ 2006, 
+    wave == 4 ~ 2008, 
+    wave == 5 ~ 2010, 
+    wave == 6 ~ 2012,
+    wave == 7 ~ 2014,
+    wave == 8 ~ 2016,
+    wave == 9 ~ 2018) ) %>% inner_join(check, by = "idauniq") %>% 
+  mutate(year_baseline = case_when(
+    year_baseline == "2004" ~ 2004,
+    year_baseline == "2008" ~ 2008)) %>%
+  filter(year_baseline2 >= year_baseline)
+
+adl <- Outcome %>% filter(!is.na(adlfive)) %>% group_by(idauniq) %>% 
+  mutate(adl = adlfive[which.min(year_baseline2)],
+         adl_total = max(adlfive,na.rm=T),adl_end = max(year_baseline2)) %>% 
+  filter(year_baseline2 == adl_end) %>% ungroup() %>% 
+  mutate(adl = if_else(adl > 3, 3, adl),
+         adl_total = if_else(adl_total > 3, 3, adl_total)) %>% 
+  select(idauniq, adl, adl_total,adl_end) %>% 
+  mutate(adl_total = if_else(adl_end < 2014 , NA, adl_total))
+
+iadl <- Outcome %>% filter(!is.na(iadlza)) %>% group_by(idauniq)  %>% 
+  mutate(iadl = iadlza[which.min(year_baseline2)],
+         iadl_total = max(iadlza,na.rm=T),iadl_end = max(year_baseline2)) %>% 
+  filter(year_baseline2 == iadl_end) %>% ungroup() %>% 
+  mutate(iadl = if_else(iadl > 3, 3, iadl),
+         iadl_total = if_else(iadl_total > 3, 3, iadl_total)) %>% 
+  select(idauniq,iadl, iadl_total, iadl_end) %>% 
+  mutate(iadl_total = if_else(iadl_end < 2014 , NA, iadl_total))
+  
+chronic <- Outcome %>% 
+    filter(!is.na(hibpe) & !is.na(diabe) & !is.na(cancre) & 
+            !is.na(lunge) & !is.na(hearte) & !is.na(stroke)) %>%
+    mutate(hibpe = as.numeric(as.character(hibpe)),
+           diabe = as.numeric(as.character(diabe)),
+           cancre = as.numeric(as.character(cancre)),
+           lunge = as.numeric(as.character(lunge)),
+           hearte = as.numeric(as.character(hearte)),
+           stroke = as.numeric(as.character(stroke))) %>%
+  mutate(chrondxe = hibpe+diabe+cancre+lunge+hearte+stroke) %>%
+  filter(any(complete.cases(chrondxe))) %>% group_by(idauniq) %>% 
+  mutate(chronic = chrondxe[which.min(year_baseline2)],
+         chronic_total = max(chrondxe,na.rm=T),chronic_end = max(year_baseline2)) %>% 
+  mutate(chronic = if_else(chronic > 3, 3, chronic),
+         chronic_total = if_else(chronic_total > 3, 3, chronic_total)) %>% 
+  select(idauniq, chronic, chronic_total,chronic_end) %>% distinct() %>%
+  mutate(chronic_total = if_else(chronic_end < 2014 , NA, chronic_total))
+  
+cognition <- Outcome %>% 
+    filter(!is.na(tr20) & !is.na(ser7) & !is.na(bwc20)) %>%
+    mutate(cognition = tr20 +ser7 + bwc20) %>%
+    group_by(idauniq) %>%
+    mutate(cogtot27 = cognition[which.min(year_baseline2)],
+           cogtot27_final = cognition[which.max(year_baseline2)],
+           cognition_end = max(year_baseline2)) %>%
+    ungroup() %>% select(idauniq,cogtot27,cogtot27_final,cognition_end) %>% 
+    distinct() %>%
+    mutate(cogfunction = case_when(cogtot27<=27 & cogtot27>=12 ~ 0,
+                                   cogtot27<=11 & cogtot27>=7 ~ 1,
+                                   cogtot27<=6 ~ 2),
+            cogfunction_final = case_when(cogtot27_final<=27 & cogtot27_final>=12 ~ 0,
+                                   cogtot27_final<=11 & cogtot27_final>=7 ~ 1,
+                                   cogtot27_final<=6 ~ 2),
+              cogfunction = factor(cogfunction, levels = c(0, 1, 2)),
+              cogfunction_final = factor(cogfunction_final, levels = c(0, 1, 2)))
+
+
+outcome_slope <- slopes %>% full_join(check,by="idauniq") %>% 
+                            full_join(chronic,by="idauniq") %>% 
+                            full_join(adl,by="idauniq") %>% 
+                            full_join(iadl,by="idauniq") %>% 
+                            full_join(cognition,by="idauniq") %>%
+                   mutate(more_than_65 = case_when(age_baseline <= 0 ~ 0,
+                                                   age_baseline > 0 ~ 1 ),
+                          age= age_baseline*5+65) #%>% filter(age>=50)
+
+outcome_slope$cogfunction_final <- relevel(outcome_slope$cogfunction_final, ref = "0")
+
+```
+
+```{r echo=FALSE,warning=FALSE}
+library(nnet)
+#### Estinate effect sizes
+# Base model 
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + chronic + offset(log(time)), family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogfunction + time, data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+table_x_1 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:chronic", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:adl", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:iadl", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:cogtot", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "base:cogfunc", p.value = round(p.value, 3), nobs = nobs(broom::glance(cogfunc))) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Adjusting for education 
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + chronic + offset(log(time)) + edyrs_e, family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + adl + offset(log(time)) + edyrs_e, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + iadl + offset(log(time)) + edyrs_e, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogtot27 + offset(log(time)) + edyrs_e, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogfunction + time + edyrs_e, data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+table_x_2 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+edu", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+edu", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+edu", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+edu", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+edu", p.value = round(p.value, 3), nobs = nobs(broom::glance(cogfunc))) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Adjusting for smoking status 
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + chronic + offset(log(time)) + smokev, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + adl + offset(log(time)) + smokev, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + iadl + offset(log(time)) + smokev, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogtot27 + time + smokev, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogfunction + time + smokev, data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+table_x_3 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+smoker", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+smoker", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+smoker", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+smoker", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+smoker", p.value = round(p.value, 3), nobs = nobs(broom::glance(cogfunc))) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+# Adjusting for bmi
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + chronic + offset(log(time)) + mbmi, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + adl + offset(log(time)) + mbmi, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + iadl + offset(log(time)) + mbmi, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogtot27 + time + mbmi, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+cogfunc <- multinom(cogfunction_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogfunction + time + mbmi, data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+table_x_4 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic+bmi", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl+bmi", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl+bmi", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot+bmi", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogfunc %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogfunc+bmi", p.value = round(p.value, 3), nobs = nobs(broom::glance(cogfunc))) %>% mutate_at(vars(3,4,5,7,8), round, 2))
+
+table_x = table_x_1 %>% full_join(table_x_2) %>% full_join(table_x_3) %>% full_join(table_x_4) %>% select( -statistic)
+
+```
+
+```{r}
+## Stratified Analysis
+# Male
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2)  + factor(year_baseline) + more_than_65 + chronic + offset(log(time)), family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90 & sex =="Male") %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + factor(year_baseline) + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Male") %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + factor(year_baseline) + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Male") %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + factor(year_baseline) + more_than_65 + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Male") %>% mutate(time = cognition_end - year_baseline))
+
+table_y_1 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:men", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:men", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:men", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:men", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2))
+
+# Female
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2)  + factor(year_baseline) + more_than_65 + chronic + offset(log(time)), family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Female") %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2)  + factor(year_baseline) + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Female") %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2)  + factor(year_baseline) + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Female") %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + factor(year_baseline) + more_than_65 + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90 & sex=="Female") %>% mutate(time = cognition_end - year_baseline))
+
+table_y_2 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:women", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:women", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:women", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:women", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+plot1 <- table_y_1 %>% full_join(table_y_2) %>% separate(term, into = c("outcome", "group")) %>%
+  filter(outcome !="cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)")),
+         group = factor(group, levels = c("men", "women"), labels = c("Men", "Women")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size in ELSA") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1, 1.6)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = "Sex", values = c("maroon", "navy")) +
+  scale_y_continuous( expand = c(0, 0)) 
+
+plot2 <- table_y_1 %>% full_join(table_y_2) %>% separate(term, into = c("outcome", "group")) %>%
+  filter(outcome =="cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("cogtot"), labels = c("Cognition Function")),
+         group = factor(group, levels = c("men", "women"), labels = c("Men", "Women")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate*-1,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.high*-1, ymax=conf.low*-1), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(0, 0.4)) + 
+  theme(legend.position = "none")+   
+  scale_fill_manual(name = "Sex", values = c("maroon", "navy")) +
+  scale_y_continuous(expand = c(0, 0), breaks = seq(0, 0.4, by = 0.1), 
+    labels = c("0", "-0.1","-0.2", "-0.3", "-0.4")) 
+
+plot_grid(plot1, plot2, ncol = 1, align = "v", rel_heights = c(1, 0.4))
+
+## Stratified by Age group 
+# Younger
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + chronic + offset(log(time)), family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90 &  age_baseline<=0) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & age_baseline<=0) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & age_baseline<=0) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90 & age_baseline<=0 ) %>% mutate(time = cognition_end - year_baseline))
+
+table_y_3 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:younger", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:younger", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:younger", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:younger", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2))  
+
+## Stratified by Age group 
+# Older
+chronic <- glm(chronic_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + chronic + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 &  age_baseline>0) %>% mutate(time = chronic_end - year_baseline))
+
+adl <- glm(adl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 & age_baseline>0) %>% mutate(time = adl_end - year_baseline))
+
+iadl <- glm(iadl_total ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90 &  age_baseline>0) %>% mutate(time = iadl_end - year_baseline))
+
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled) + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90 & age_baseline>0 ) %>% mutate(time = cognition_end - year_baseline))
+
+table_y_4 = chronic %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "chronic:older", p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+  full_join(adl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "adl:older", p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+  full_join(iadl %>% broom::tidy(exp = T, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "iadl:older", p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2))  %>%
+  full_join(cogtot %>% broom::tidy(exp = F, conf.int = T) %>% filter(term == "scale(composite_scaled)") %>% mutate(term = "cogtot:older", p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2)) 
+
+
+plot1 <- table_y_3 %>% full_join(table_y_4) %>% separate(term, into = c("outcome", "group")) %>% 
+  filter(outcome !="cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("mortality", "chronic", "adl", "iadl"), labels = c("Mortality (HR)", "Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)")),
+         group = factor(group, levels = c("younger", "older"), labels = c("Younger", "Older")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size in ELSA") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(1, 1.6)) + 
+  guides(fill = guide_legend(reverse = TRUE)) +   
+  scale_fill_manual(name = "Age group", values = c("#97c8af","#96b6d8")) +
+  scale_y_continuous( expand = c(0, 0)) 
+
+plot2 <- table_y_3 %>% full_join(table_y_4) %>% separate(term, into = c("outcome", "group")) %>% 
+  filter(outcome =="cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("cogtot"), labels = c("Cognition Function")),
+         group = factor(group, levels = c("younger", "older"), labels = c("Younger", "Older")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = outcome, y = estimate*-1,
+               fill = group)) + geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.92),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=outcome, ymin=conf.high*-1, ymax=conf.low*-1), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Effect size") + 
+  theme_bw() + 
+  scale_x_discrete(limits = rev) +
+  coord_flip(ylim = c(0, 0.4)) + 
+  theme(legend.position = "none")+   
+  scale_fill_manual(name = "Age group", values = c("#97c8af","#96b6d8")) +
+  scale_y_continuous(expand = c(0, 0), breaks = seq(0, 0.4, by = 0.1), 
+    labels = c("0", "-0.1","-0.2", "-0.3", "-0.4")) 
+
+plot_grid(plot1, plot2, ncol = 1, align = "v", rel_heights = c(1, 0.4))
+
+table_y = table_y_1 %>% full_join(table_y_2) %>% full_join(table_y_3) %>%  full_join(table_y_4)
+
+
+```
+
+```{r}
+# Leave-one-out analysis
+# corrplot
+slopes3 = slopes  %>%
+    rowwise %>% 
+  mutate(poa_dbp = mean(c( gripsum_slope, log_hscrp_slope, hgb_slope, hba1c_slope, mwaist_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_grip = mean(c(diasto_slope, log_hscrp_slope, hgb_slope, hba1c_slope, mwaist_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_crp = mean(c(diasto_slope, gripsum_slope, hgb_slope, hba1c_slope, mwaist_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_hgb = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hba1c_slope, mwaist_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_a1c = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hgb_slope, mwaist_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_waist = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hgb_slope, hba1c_slope, fev_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),  
+         poa_walking = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hgb_slope, hba1c_slope, mwaist_slope, fev_slope, balance_e_slope), na.rm = TRUE),  
+         poa_fev = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hgb_slope, hba1c_slope, mwaist_slope, balance_e_slope, log_min_wspeed_slope), na.rm = TRUE),
+         poa_btest = mean(c(diasto_slope, gripsum_slope, log_hscrp_slope, hgb_slope, hba1c_slope, mwaist_slope, fev_slope, log_min_wspeed_slope), na.rm = TRUE) ) %>% ungroup() %>% group_by(sex) %>%
+  mutate(across(starts_with("poa"), ~ scale(.) %>% as.vector))
+
+
+
+library(GGally)
+ordercolors<-c("maroon", "navy")
+
+
+ggpairs(slopes3, # 指定用来创建矩阵散点图的数据集
+                columns = c("composite_scaled","poa_a1c","poa_crp","poa_hgb","poa_dbp",
+                    "poa_waist","poa_fev","poa_grip","poa_btest","poa_walking"),
+        columnLabels = c("original PoA","Without HbA1c", "Without C-reactive Protein","Without Hemoglobin", 
+                 "Without Diastolic BP","Without Waist Circ.", "Without FEV",
+                 "Without Grip Strength", "Without Balance Test", "Without Gait Speed"),
+        mapping = ggplot2::aes(fill=sex, color=sex), 
+        lower = list(continuous=wrap('points', shape=21, size=0.45, alpha=0.65)), 
+        diag = list(continuous=wrap("densityDiag", color="black", alpha=0.65)),
+        upper = list(continuous=wrap("cor", size=3.5), combo=wrap("box_no_facet", color="grey20")))+ # 
+  scale_fill_manual(values = ordercolors) +
+  scale_color_manual(values = ordercolors) +
+  ggplot2::theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+
+slopes3 <- slopes3 %>% select("idauniq","poa_dbp","poa_grip","poa_crp",
+                                        "poa_hgb","poa_a1c","poa_waist","poa_walking",
+                                        "poa_fev","poa_btest")
+
+outcome_slope <- outcome_slope %>% left_join(slopes3,by="idauniq")
+#########
+library(ggthemes)
+library(RColorBrewer)
+
+generate_table <- function(poa_vars) {
+  # formula
+  formula_chronic <- as.formula(paste("chronic_total ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.x + factor(year_baseline) + more_than_65 + chronic + offset(log(time))"))
+  formula_adl <- as.formula(paste("adl_total ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.x + factor(year_baseline) + more_than_65 + adl + offset(log(time))"))
+  formula_iadl <- as.formula(paste("iadl_total ~ scale(", poa_vars, ")+ age_baseline + I(age_baseline^2) + sex.x + factor(year_baseline) + more_than_65 + iadl + offset(log(time))"))
+  formula_cogtot <- as.formula(paste("cogtot27_final ~ scale(", poa_vars, ") + age_baseline + I(age_baseline^2) + sex.x + factor(year_baseline) + more_than_65 + cogtot27 + time"))
+
+  # model
+  chronic <- glm(formula_chronic, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+  adl <- glm(formula_adl, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+  iadl <- glm(formula_iadl, family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+  cogtot <- glm(formula_cogtot, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+  
+  # generate table
+  table <- chronic %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("chronic:", poa_vars), p.value = round(p.value, 3), nobs = nobs(chronic)) %>% mutate_at(c(2,3,4,6,7), round, 2) %>% 
+    full_join(adl %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("adl:", poa_vars), p.value = round(p.value, 3), nobs = nobs(adl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>% 
+    full_join(iadl %>% broom::tidy(exp = TRUE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("iadl:", poa_vars), p.value = round(p.value, 3), nobs = nobs(iadl)) %>% mutate_at(c(2,3,4,6,7), round, 2)) %>%
+    full_join(cogtot %>% broom::tidy(exp = FALSE, conf.int = TRUE) %>% filter(term == paste0("scale(", poa_vars, ")")) %>% mutate(term = paste0("cogtot:", poa_vars), p.value = round(p.value, 3), nobs = nobs(cogtot)) %>% mutate_at(c(2,3,4,6,7), round, 2))
+  
+  return(table)
+}
+
+# list of variable
+poa_vars <- c("composite_scaled","poa_dbp","poa_grip","poa_crp",
+                                  "poa_hgb","poa_a1c","poa_waist","poa_walking",
+                                  "poa_fev","poa_btest")
+# list of result table
+table_1 <- generate_table("composite_scaled")
+table_2 <- generate_table("poa_dbp")
+table_3 <- generate_table("poa_grip")
+table_4 <- generate_table("poa_crp")
+table_5 <- generate_table("poa_hgb")
+table_6 <- generate_table("poa_a1c")
+table_7 <- generate_table("poa_waist")
+table_8 <- generate_table("poa_walking")
+table_9 <- generate_table("poa_fev")
+table_10 <- generate_table("poa_btest")
+library(ggthemes)
+library(RColorBrewer)
+# merge the table to plot
+plot1 <- table_1 %>% full_join(table_2) %>% full_join(table_3) %>% full_join(table_4) %>% 
+  full_join(table_5) %>% full_join(table_6)%>% full_join(table_7) %>% 
+  full_join(table_8)%>% full_join(table_9)%>% full_join(table_10) %>% 
+  separate(term, into = c("outcome", "group"), sep = ":") %>% 
+  filter(outcome != "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("chronic", "adl", "iadl"), labels = c("Chronic disease (IRR)", "ADLs (IRR)", "IADLs (IRR)")),
+         group = factor(group, 
+                        levels = c("composite_scaled","poa_a1c","poa_crp","poa_hgb","poa_dbp",
+                                   "poa_waist","poa_fev","poa_grip","poa_btest","poa_walking"), 
+                        labels = c("original PoA","Without HbA1c", "Without C-reactive Protein",
+                                   "Without Hemoglobin", "Without Diastolic BP","Without Waist Circ.", 
+                                   "Without FEV",  "Without Grip Strength", "Without Balance Test", 
+                                   "Without Gait Speed")),
+         group = factor(group, rev(levels(group)))) %>%
+  ggplot(aes(x = group, y = estimate,
+             fill = group)) + 
+  geom_bar(stat = "identity",colour="black", 
+           position=position_dodge(0.9),width=0.8, alpha=0.8)+
+  geom_errorbar(aes(x=group, ymin=conf.low, ymax=conf.high), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("Pace of Aging Effect-Size") + 
+  theme_calc() + 
+
+  coord_flip(ylim = c(1.0, 1.9)) + 
+  guides(fill = guide_legend(reverse = TRUE)) + 
+  facet_wrap(~ factor(outcome), nrow = 1)+
+  scale_fill_manual(name = " ", values = rev(brewer.pal(10, "Spectral"))) +
+  scale_y_continuous( expand = c(0, 0)) 
+
+
+plot2 <- table_1 %>% full_join(table_2) %>% full_join(table_3) %>% full_join(table_4) %>% 
+  full_join(table_5) %>% full_join(table_6)%>% full_join(table_7) %>% 
+  full_join(table_8)%>% full_join(table_9)%>% full_join(table_10) %>% 
+  separate(term, into = c("outcome", "group"), sep = ":") %>% 
+  filter(outcome == "cogtot") %>%
+  mutate(outcome = factor(outcome, levels = c("cogtot"), labels = c("Cognition Function")),
+         group = factor(group, levels = c("composite_scaled","poa_a1c","poa_crp","poa_hgb","poa_dbp",
+                                   "poa_waist","poa_fev","poa_grip","poa_btest","poa_walking"), 
+                        labels = c("original PoA","Without HbA1c", "Without C-reactive Protein",
+                                   "Without Hemoglobin", "Without Diastolic BP","Without Waist Circ.", 
+                                   "Without FEV",  "Without Grip Strength", "Without Balance Test", 
+                                   "Without Walking Speed")),
+         group = factor(group, rev(levels(group)))) %>% 
+  ggplot(aes(x = group, y = estimate*-1,
+               fill = group)) + 
+  geom_bar(stat = "identity",colour="black", 
+    position=position_dodge(0.9),width=0.8, alpha=0.8) +
+  geom_errorbar(aes(x=group, ymin=conf.high*-1, ymax=conf.low*-1), position = position_dodge(0.9),
+                width = 0.25) + 
+  xlab("") + 
+  ylab("") + 
+  theme_calc() + 
+  coord_flip(ylim = c(0, 0.4))  +
+  scale_y_continuous(expand = c(0, 0), breaks = seq(0, 0.4, by = 0.1), 
+    labels = c("0", "-0.1","-0.2", "-0.3", "-0.4")) + 
+  theme(legend.position = "none")+   
+  facet_wrap(~ factor(outcome), nrow = 1) +
+  scale_fill_manual(name = " ", values = rev(brewer.pal(10, "Spectral")))
+
+plot_grid(plot2,plot1, align = "h", rel_widths = c(0.35, 1))
+
+
+model <- glm(cogtot27_final ~ scale(poa_btest) + age_baseline + I(age_baseline^2) + sex.x + factor(year_baseline) + more_than_65 + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+summary(model)
+```
+
+```{r}
+# Interaction Effect
+# Chronic Disease
+outcome_slope$sex <- outcome_slope$sex.x
+chronic <- glm(chronic_total ~ scale(composite_scaled)+ scale(composite_scaled)*sex + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + chronic + offset(log(time)), family = "poisson", 
+               data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = chronic_end - year_baseline))
+
+int_2 = epi.interaction(chronic, c(2,3,9), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "chronic*sex")
+
+# ADLs
+adl <- glm(adl_total ~ scale(composite_scaled)+ scale(composite_scaled)*sex + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + adl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = adl_end - year_baseline))
+
+int_3 = epi.interaction(adl, c(2,3,9), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "adl*sex")
+
+# IADLs
+iadl <- glm(iadl_total ~ scale(composite_scaled)+ scale(composite_scaled)*sex + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + iadl + offset(log(time)), family = "poisson", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = iadl_end - year_baseline))
+
+int_4 = epi.interaction(iadl, c(2,3,9), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "iadl*sex")
+
+# cognition
+cogtot <- glm(cogtot27_final ~ scale(composite_scaled)+ scale(composite_scaled)*sex + age_baseline + I(age_baseline^2) + sex + factor(year_baseline) + more_than_65 + cogtot27 + time, family = "gaussian", data = outcome_slope %>% filter(age>=50 & age<= 90) %>% mutate(time = cognition_end - year_baseline))
+
+int_5 = epi.interaction(cogtot, c(2,3,9), param = "product", 
+    conf.level = 0.95)$reri %>% round(2) %>% mutate(model = "cognition*sex")
+
+
+int_sex = int_2 %>% full_join(int_3) %>% full_join(int_4) %>% full_join(int_5)
+
+## Outcome Summary Table
+outcome_slope %>% filter(!is.na(chronic)&!is.na(chronic_total))%>% 
+  summarise(total = n(), 
+    zerob = sum(chronic == 0),
+    oneb = sum(chronic == 1),
+    twob = sum(chronic == 2),
+    threeb_plus = sum(chronic >= 3),
+    Percent_with_New_Chronic_Diseases = sum(chronic_total > chronic))
+outcome_slope %>% filter(!is.na(adl)&!is.na(adl_total))%>% 
+  summarise(total = n(), 
+    zerob = sum(adl == 0),
+    oneb = sum(adl == 1),
+    twob = sum(adl == 2),
+    threeb_plus = sum(adl >= 3),
+    Percent_with_New_ADL = sum(adl_total > adl))
+outcome_slope %>% filter(!is.na(iadl)&!is.na(iadl_total))%>% 
+  summarise(total = n(), 
+    zerob = sum(iadl == 0),
+    oneb = sum(iadl == 1),
+    twob = sum(iadl == 2),
+    threeb_plus = sum(iadl >= 3),
+    Percent_with_New_IADL = sum(iadl_total > iadl))
+
+outcome_slope %>% filter(!is.na(chronic) & !is.na(chronic_total) & chronic!=0) %>% 
+  summarise(mean = mean(chronic), sd = sd(chronic))
+
+outcome_slope %>% filter(chronic_total > chronic) %>% 
+  summarise(mean = mean(chronic_total), sd = sd(chronic_total))
+
+outcome_slope %>% filter(!is.na(adl) & !is.na(adl_total) & adl!=0) %>% 
+  summarise(mean = mean(adl), sd = sd(adl))
+
+outcome_slope %>% filter(adl_total > adl) %>% 
+  summarise(mean = mean(adl_total), sd = sd(adl_total))
+
+outcome_slope %>% filter(!is.na(iadl) & !is.na(iadl_total) & iadl!=0) %>% 
+  summarise(mean = mean(iadl), sd = sd(iadl))
+
+outcome_slope %>% filter(iadl_total > iadl) %>% 
+  summarise(mean = mean(iadl_total), sd = sd(iadl_total))
+
+outcome_slope %>% 
+  filter(cognition_end >= 2014, !is.na(cogtot27), !is.na(cogtot27_final)) %>% 
+  summarise(
+    Total_Participants = n(),
+    mean_baseline = mean(cogtot27, na.rm = TRUE),
+    sd_baseline = sd(cogtot27, na.rm = TRUE),
+    mean_followup = mean(cogtot27_final, na.rm = TRUE),
+    sd_followup = sd(cogtot27_final, na.rm = TRUE)
+  )
+```

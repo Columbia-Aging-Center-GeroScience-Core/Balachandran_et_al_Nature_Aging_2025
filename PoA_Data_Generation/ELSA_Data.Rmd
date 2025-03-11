@@ -1,0 +1,1397 @@
+---
+title: "ELSA_Data"
+author: "Yifan Shi"
+date: "2025-02-09"
+output: html_document
+---
+loading packages
+```{r}
+packages <- c("tidyverse", "haven", "furniture", "foreign", "patchwork", "lme4", 
+              "survival", "survminer", "ggfortify", "splines", "stargazer", "DescTools", 
+              "xtable", "ggsci", "epiR", "cowplot", "float", "tidyr", "tidyselect", "gt", 
+              "gtsummary", "flextable", "gridExtra", "knitr", "kableExtra", "lmerTest", 
+              "broom.mixed", "openxlsx")
+
+# Load each package using a loop
+for (pkg in packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+```
+
+
+## PART 1: 5050 Harmonized Data
+set path, select variables
+```{r}
+# Set the path to the data files
+path ="/Users/syf/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/Data/UKDA-5050/UKDA-5050-stata/stata/stata13_se"
+
+# Define file paths
+file_h_elsa_g3 = "h_elsa_g3.dta"
+
+# Read the dataset
+df_h_elsa_g3 <- read_dta(file = paste0(path, "/", file_h_elsa_g3))
+
+# Define the list of physical measure variables to be selected
+variables_physical_measures <- c(
+  "ragender",
+  "rabyear", #birth year
+  "r2agey", "r4agey", "r6agey", # R age (years) at interview
+  "r2smokev", "r4smokev", "r6smokev", # smoke ever
+  "r2smoken", "r4smoken", "r6smoken", # smoke now
+  "r2smokef", "r4smokef", "r6smokef", # number cigarettes/day
+  "raeduc_e", #education categorical 
+  "raedyrs_e", #years of education
+  "raeducl", #harmonized education
+  "r2sbstan", "r4sbstan", "r6sbstan", # R side-by-side test result (sec)
+  "r2semitan", "r4semitan", "r6semitan", # R semi-tandem test result (sec)
+  "r2fulltan_e", "r4fulltan_e", "r6fulltan_e", # R full-tandem test result (sec)
+  "r2sbsdone", "r4sbsdone", "r6sbsdone", # R completed full 10 seconds side-by-side
+  "r2semidone", "r4semidone", "r6semidone", # R completed full 10-second semi-tandem test
+  "r2fulldone_e", "r4fulldone_e", "r6fulldone_e", # R completed 10/30 seconds full-tandem
+  "r2balance_e", "r4balance_e", "r6balance_e", # R balance test summary score
+  
+  "r2balsft", "r4balsft", "r6balsft", #r didn't complete balance: unsafe/health reason
+  "r2balref", "r4balref", "r6balref", #r didn't complete balance: refused
+  "r2baltryu", "r4baltryu", "r6baltryu", #r didn't complete balance: tried but unable
+  "r2balothr", "r4balothr", "r6balothr", #r didn't complete balance: other reason
+  
+  "r2legrores", "r4legrores", "r6legrores", # R result leg raise eyes open
+  "r2legrsres", "r4legrsres", "r6legrsres", # R result leg raise eyes shut
+  "r2legrosec", "r4legrosec", "r6legrosec", # Seconds R leg raise eyes open
+  "r2legrssec", "r4legrssec", "r6legrssec", # Seconds R leg raise eyes shut
+  "r2legrocomp", "r4legrocomp", "r6legrocomp", #r willing and able to complete leg raise eyes open
+  "r2legrscomp", "r4legrscomp", "r6legrscomp", #r willing and able to complete leg raise eyes shut
+  
+  "r2legrsft", "r4legrsft", "r6legrsft", #r didn't complete leg raise: unsafe/health reas
+  "r2legrref", "r4legrref", "r6legrref", #r didn't complete leg raise: refused
+  "r2legrtryu", "r4legrtryu", "r6legrtryu",#r didn't complete leg raise: tried but unable 
+  "r2legrothr", "r4legrothr", "r6legrothr",#r didn't complete leg raise: other reason
+  
+  "r2wspeed1", "r4wspeed1", "r6wspeed1", #r time for walking speed test 1(sec)
+  "r2wspeed2", "r4wspeed2", "r6wspeed2", #r time for walking speed test 2(sec)
+  "r2wspeed", "r4wspeed", "r6wspeed", #r average time for walking speed test (sec)
+  
+  "r2chr1res", "r4chr1res", "r6chr1res", # R result 1 chair stand
+  "r2chr1comp", "r4chr1comp", "r6chr1comp", # R willing and able to complete 1 chair stand
+  "r2chr5sec", "r4chr5sec", "r6chr5sec", # Seconds for R to do 5 chair stands
+  "r2chr10sec", "r4chr10sec", "r6chr10sec", # Seconds for R to do 10 chair stands
+  "r2chrnum", "r4chrnum", "r6chrnum", # R number chair stands completed
+  "r2chrcomp", "r4chrcomp", "r6chrcomp", # R willing and able to complete 5/10 chair stand
+  
+  "r2chrsft", "r4chrsft", "r6chrsft", #r didn't complete chair stand: unsafe/health rea
+  "r2chrref", "r4chrref", "r6chrref", #r didn't complete chair stand: refused
+  "r2chrtryu", "r4chrtryu", "r6chrtryu", #r didn't complete chair stand: tried but unable
+  "r2chrequp", "r4chrequp", "r6chrequp", #r didn't complete chair stand: no suitable chai
+  "r2chrothr", "r4chrothr", "r6chrothr", #r didn't complete chair stand: other reason
+  
+  "r2systo","r4systo", "r6systo", #r average blood pressure measure (systolic)
+  "r2diasto", "r4diasto", "r6diasto", #r average blood pressure measure (systolic)
+  "r2pulse", "r4pulse", "r6pulse", #r average pulse measure 2 & 3 
+  "r2gripsum", "r4gripsum", "r6gripsum", #r dominant hand grip strength (kg)
+  "r2mheight", "r4mheight", "r6mheight", #r height measurement in meters
+  "r2mweight", "r4mweight", "r6mweight", #r weight measurement in kilograms
+  "r2mbmi", "r4mbmi", "r6mbmi", #r measured Body Mass Index (kg/m2)
+  "r2mwaist", "r4mwaist", "r6mwaist", #r average waist measurement in centimeters
+  "r2fvc","r4fvc", #r maximum lung function forced vital capacity
+  "r6fvc_e", #r maximum lung function forced vital capacity
+  "r2fev", "r4fev", #r maximum lung function forced expiratory volume
+  "r6fev_e" #r maximum lung function forced expiratory volume
+  
+)
+
+
+#Select Relevant variables
+df_physical_measures <- df_h_elsa_g3 %>%
+  select(idauniq, all_of(variables_physical_measures))
+
+```
+
+rename variables
+```{r}
+### renaming the variables to prepare for pivoting
+## renaming r6fev_e/r6fvc_e to r6fev/r6fvc to be consistent with wave 2 and 4
+    #However, the reason for the inconsistency in variable naming is that in Wave 6, a different spirometer was used to measure lung function than the spirometer used in Waves 2 and 4. Therefore, the results across the waves should be interpreted separately.
+## renaming ragender to gender and rabyear to byear for easier readability, also to exclude it from pivoting, as is starts with "r"
+
+df_physical_measures <- df_physical_measures %>%
+  rename(
+    r6fev = r6fev_e,
+    r6fvc = r6fvc_e,
+    gender = ragender,
+    byear = rabyear,
+    educ_e = raeduc_e,
+    edyrs_e = raedyrs_e,
+    educl = raeducl
+  )
+```
+
+pivot longer
+```{r}
+# Pivot the datafile from wide to long, based on the naming convention of the variables. 
+physical_measure_long <- df_physical_measures %>%
+  pivot_longer(
+    cols = starts_with("r"), # This selects all columns that start with 'r'
+    names_to = c("wave", ".value"), # Creates two new columns 'wave' and the measurement variable names
+    names_pattern = "r(\\d+)(.+)" # to extract the wave number and the variable name
+  ) %>%
+  mutate(wave = as.numeric(wave)) # Convert wave from character to numeric
+
+# Display the structure and a summary of the long format dataframe
+str(physical_measure_long)
+summary(physical_measure_long)
+```
+
+################################################################################## 
+Generating new derived variables
+```{r}
+################################################################################## 
+### Generating new derived variables
+##Combine tandem balance and leg raise balance tests 
+# 1 = no semi tandem/no s-b-s tandem 
+# 2 = no semi tandem/yes s-b-s tandem
+# 3 = yes semi tandem/no full tandem
+# 4 = yes semi tandem/yes full tandem
+# 5 = can do leg raise  w/ eyes open (<30seconds)
+# 6 = completed leg raise w/ eyes open (30 seconds+)
+# 7 = can do leg raise with eyes closed (<30 seconds)
+# 8 = completed leg raise w/ eyes closed (30 seconds+)
+
+## balance_e: 
+# 1.no semi tandem/no s-b-s tandem 
+# 2.no semi tandem/yes s-b-s tandem
+# 3.yes semi tandem/no full tandem
+# 4.yes semi tandem/yes full tandem
+
+table(physical_measure_long$balance_e)
+# 1     2     3     4 
+# 127   993  3905 18244 
+
+table(physical_measure_long$balance_e, physical_measure_long$wave)
+
+#      2    4    6
+# 1   41   42   44
+# 2  341  341  311
+# 3 1326 1372 1207
+# 4 5654 6492 6098
+summary(physical_measure_long$balance_e)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+# 1.00    4.00    4.00    3.73    4.00    4.00   36137 
+
+# # legraise
+# ELSA variables RwLEGRORES and RwLEGRSRES are coded as 1 if the respondent held the leg raise for 30 seconds, and are coded as 2 if the respondent held the leg raise for less than 30 seconds.
+
+# 1 = can do leg raise  w/ eyes open (<30seconds)      legrores=2, n=5215
+# 2 = completed leg raise w/ eyes open (30 seconds+)   legrores=1, n=9404
+# 3 = can do leg raise with eyes closed (<30 seconds)  legrsres=2, n=8917
+# 4 = completed leg raise w/ eyes closed (30 seconds+) legrsres=1, n=388
+
+#respondent was not asked to complete the leg raise test with their eyes closed if they did not complete the leg raise test with their eyes open at all or for the complete 30 seconds; so if legrores=2 (eyes open <30s), respondent did not proceed to legrsres (eyes closed); if legrores=1 (eyes open 30s), respondent may proceed with legrsres (eyes closed), and legrsres value (eyes closed) will be prioritized.
+
+
+# legraise is set to 3 if legrsres equals 2, regardless of the legrores value.
+# legraise is set to 4 if legrsres equals 1, regardless of the legrores value.
+# If legrsres does not exist or does not meet the conditions, then legrores is evaluated.
+
+table(physical_measure_long$legrtryu)
+# 0   1 
+# 506 145 
+physical_measure_long <- physical_measure_long %>%
+  mutate(legraise = case_when(
+    legrsres == 2 ~ 3, # 3 = can do leg raise with eyes closed (<30 seconds) 
+    legrsres == 1 ~ 4, # 4 = completed leg raise w/ eyes closed (30 seconds+)
+    legrores == 2 ~ 1, # 1 = can do leg raise  w/ eyes open (<30seconds)
+    legrores == 1 ~ 2, # 2 = completed leg raise w/ eyes open (30 seconds+)
+    TRUE ~ NA_real_  
+  ))
+
+table(physical_measure_long$legraise)
+# 1     2     3    4 
+# 5215 99   8917  388
+
+#as participants aged 70 and above were not measured for leg raise, the follow steps were to inspect for outliers if any.
+ggplot(data = physical_measure_long, aes(x = agey, y = legraise)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  labs(title = "Scatter Plot of Leg Raise Scores by Age",
+       x = "Age",
+       y = "Leg Raise Score") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+        panel.grid.minor = element_blank())
+
+#based on the scatter plot, one participant aged around 75+ has a legraise score of 3. It should be coded to NA
+selected_data <- select(physical_measure_long, idauniq, agey, wave, legraise, legrsres, legrores)
+
+suspect_data <- selected_data %>%
+  filter(agey >= 70 & (!is.na(legraise) ))
+
+print(suspect_data)
+# idauniq  agey  wave legraise legrsres                             legrores             
+# 106062    81     4     3       2 [2.held for less than 30 sec]       1 [1.held for 30 sec]
+
+
+#idauniq 106062 at wave 4 was aged 81. This participant has legrsres value of 2, legrores value of 1, and legraise value of 3
+#proceed to code legrores, legrsres and legraise value of 106062 at wave 4 to NA
+
+
+physical_measure_long <- physical_measure_long %>%
+  mutate(
+    legraise = ifelse(idauniq == 106062 & wave == 4, NA_real_, legraise),
+    legrsres = ifelse(idauniq == 106062 & wave == 4, NA_real_, legrsres),
+    legrores = ifelse(idauniq == 106062 & wave == 4, NA_real_, legrores)
+  )
+#other leg raise variables for 106062 at wave 4 are not treated as kept as original; only legrsres, legrores and legraise are treated; as legrsres, legrores are used to compute the composite score legraise and tandemleg.
+
+table(physical_measure_long$legraise)
+# 1    2    3    4 
+# 5215   99 8916  388 
+
+#notice that legraise=3 now has 1 less (8917->8916) participant
+
+table(physical_measure_long$legraise, physical_measure_long$wave)
+#     2    4    6
+# 1 1704 1877 1634
+# 2   27   41   31
+# 3 2779 3279 2858
+# 4  105  163  120
+
+table(physical_measure_long$legrocomp)
+# 0     1 
+# 552 14619 
+table(physical_measure_long$legrores)
+# 1    2 
+# 9403 5215 
+table(physical_measure_long$legrsres)
+# 1    2 
+# 388 8916 
+table(physical_measure_long$legrores,physical_measure_long$legrsres )
+#     1    2
+# 1  388 8916
+# 2    0    0
+
+
+physical_measure_long <- physical_measure_long %>%
+  mutate(
+    tandemleg = case_when(
+      legraise == 1 ~ 5,  # 5 = can do leg raise  w/ eyes open (<30seconds)
+      legraise == 2 ~ 6,  # 6 = completed leg raise w/ eyes open (30 seconds+)
+      legraise == 3 ~ 7,  # 7 = can do leg raise with eyes closed (<30 seconds)
+      legraise == 4 ~ 8,  # 8 = completed leg raise w/ eyes closed (30 seconds+) 
+      balance_e == 1 ~ 1, # 1 = no semi tandem/no s-b-s tandem
+      balance_e == 2 ~ 2, # 2 = no semi tandem/yes s-b-s tandem
+      balance_e == 3 ~ 3, # 3 = yes semi tandem/no full tandem
+      balance_e == 4 ~ 4, # 4 = yes semi tandem/yes full tandem
+      
+      TRUE ~ NA_integer_  # Handles cases where none of the conditions are met
+    )
+  )
+table(physical_measure_long$tandemleg)
+# 1    2    3    4    5    6    7    8 
+# 127  874 2186 5463 5215   99 8916  388 
+table(physical_measure_long$tandemleg, physical_measure_long$wave)
+#     2    4    6
+# 1   41   42   44
+# 2  301  299  274
+# 3  721  744  721
+# 4 1684 1801 1978
+# 5 1704 1877 1634
+# 6   27   41   31
+# 7 2779 3279 2858
+# 8  105  163  120
+summary(physical_measure_long$tandemleg)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+# 1.00    4.00    5.00    5.26    7.00    8.00   36137 
+```
+
+
+```{r}
+################################################################################## 
+# chairstand A and B:
+# 0 = single chair stand not completed, or used arms to stand chr1res=2, 3
+# 1 = can do chair stand (stood w/out using arms)       chr1res=1
+# 2 = Q4 (slowest quartile) in time to 5 chair stands   chr5sec Q4
+# 3 = Q3                                                chr5sec Q3
+# 4 = Q2                                                chr5sec Q2
+# 5 = Q1                                                chr5sec Q1
+
+## 2 versions: 
+# Version A defines the time quartiles based on all participants; 
+# Version B defines the time quartiles based on only participants<65y)
+
+################################################################
+# Version A defines the time quartiles based on all participants; 
+
+# chairstand:
+# 0 = single chair stand not completed, or used arms to stand chr1res=2, 3
+# 1 = can do chair stand (stood w/out using arms)       chr1res=1
+# 2 = Q4 (slowest quartile/taking the longest time) in time to 5 chair stands   chr5sec Q4
+# 3 = Q3                                                chr5sec Q3
+# 4 = Q2                                                chr5sec Q2
+# 5 = Q1                                                chr5sec Q1
+
+
+summary(physical_measure_long$chr5sec)
+# Min.    1st Qu.    Median    Mean    3rd Qu.    Max.    NA's 
+# 0.00    8.67       10.61     11.38   13.09      63.43   39237 
+
+
+# calculating the quartiles of chr5sec based on all participants
+all_quartiles <- quantile(physical_measure_long$chr5sec, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+print(all_quartiles)
+# 25%   50%   75% 
+# 8.67 10.61 13.09 
+
+# Q4:greater than 13.09
+# Q3: 10.61-13.09
+# Q2: 8.67-10.61
+# Q1:<8.67
+
+# generating chairstandA variable 
+physical_measure_long <- physical_measure_long %>%
+  mutate(
+    chairstandA = case_when(
+      chr5sec > all_quartiles[3] ~ 2, # Q4
+      chr5sec > all_quartiles[2] ~ 3, # Q3
+      chr5sec > all_quartiles[1] ~ 4, # Q2
+      chr5sec <= all_quartiles[1] ~ 5, # Q1 
+      chr1res == 1 ~ 1, # Can do single chair stand without using arms
+      chr1res %in% c(2, 3) ~ 0, # single chair stand not completed, or used arms to stand
+      TRUE ~ NA_real_ # Default case to handle unexpected conditions
+    )
+  )
+
+table(physical_measure_long$chr1res)
+# 1     2     3 
+# 20658   375   165
+table(physical_measure_long$chairstandA)
+#   0  1    2    3    4    5 
+# 540 489 5026 5043 5013 5087 
+
+table(physical_measure_long$chairstandA, physical_measure_long$wave)
+#     2    4    6
+# 0  193  181  166
+# 1  199  189  101
+# 2 1788 1728 1510
+# 3 1620 1841 1582
+# 4 1513 1777 1723
+# 5 1447 1791 1849
+
+################################################################
+# Version B defines the time quartiles based on only participants<65y)
+under65_quartiles <- quantile(physical_measure_long %>% filter(agey < 65) %>% pull(chr5sec), probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+print(under65_quartiles)
+# 25%     50%     75% 
+# 7.9900  9.6800 11.6675 
+
+physical_measure_long <- physical_measure_long %>%
+  mutate(
+    chairstandB = case_when(
+      chr5sec > under65_quartiles[3] ~ 2, # Q4
+      chr5sec > under65_quartiles[2] ~ 3, # Q3
+      chr5sec > under65_quartiles[1] ~ 4, # Q2
+      chr5sec <= under65_quartiles[1] ~ 5, # Q1 
+      chr1res == 1 ~ 1, # Can do single chair stand without using arms
+      chr1res %in% c(2, 3) ~ 0, # single chair stand not completed, or used arms to stand
+      TRUE ~ NA_real_ # Default case to handle unexpected conditions
+    )
+  )
+
+table(physical_measure_long$chairstandB)
+
+# 0    1    2    3    4    5 
+# 540 489 7627 4952 4085 3505 
+
+
+table(physical_measure_long$chairstandB, physical_measure_long$wave)
+#     2    4    6
+# 0  193  181  166
+# 1  199  189  101
+# 2 2679 2674 2274
+# 3 1520 1773 1659
+# 4 1187 1473 1425
+# 5  982 1217 1306
+```
+
+
+```{r}
+################################################################
+#Summary Statistics for balance tests
+balance <- c("balance_e", "legraise", "tandemleg", "chairstandA", "chairstandB")
+
+summary_results <- lapply(balance, function(biomarker) {
+  physical_measure_long %>%
+    group_by(wave) %>%
+    summarise(
+      N = sum(!is.na(.data[[biomarker]])),
+      Mean = mean(.data[[biomarker]], na.rm = TRUE),
+      SD = sd(.data[[biomarker]], na.rm = TRUE),
+      Min = min(.data[[biomarker]], na.rm = TRUE),
+      Max = max(.data[[biomarker]], na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(Variable = biomarker) %>%  
+    select(Variable, everything())   
+}) %>%
+  bind_rows()  # 
+
+summary_results_overall <- lapply(balance, function(biomarker) {
+  physical_measure_long %>%
+    summarise(
+      N = sum(!is.na(.data[[biomarker]])),
+      Mean = mean(.data[[biomarker]], na.rm = TRUE),
+      SD = sd(.data[[biomarker]], na.rm = TRUE),
+      Min = min(.data[[biomarker]], na.rm = TRUE),
+      Max = max(.data[[biomarker]], na.rm = TRUE),
+    ) %>%
+    mutate(Variable = biomarker) %>%  
+    select(Variable, everything())   
+}) %>%
+  bind_rows()  # 
+```
+
+
+```{r}
+################################################################
+#walking speed
+physical_measure_long <- physical_measure_long %>% 
+  mutate(min_wspeed = pmin(wspeed1, wspeed2, na.rm = TRUE))
+  
+
+physical_measure_long %>% ggplot(aes(x = min_wspeed, fill = as.factor(wave))) + 
+  geom_histogram(aes(y = ..density..), bins = 30, alpha = 0.6, position = "identity") +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~wave) + 
+  labs(title = "Distribution of Minimum Walking Speed by Wave",
+       x = "Minimum Walking Speed",
+       y = "Density",
+       fill = "Wave") +
+  theme_minimal()
+
+physical_measure_long <- physical_measure_long %>% 
+  mutate(log_min_wspeed = log(min_wspeed + 1))
+```
+
+
+```{r}
+#saving the physical_measure_long data
+write_dta(physical_measure_long, "~/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/YifanShi/Data/ELSA/biomarkers_5050_2025.dta")
+
+```
+
+## PART 2: Nurse Visit Data
+
+NURSE VISIT
+loading nurse visit datasets
+```{r}
+# Set the path to the data files
+path ="/Users/syf/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/Data/UKDA-5050/UKDA-5050-stata/stata/stata13_se"
+
+# Define file paths for different datasets
+file_w2nurse = "wave_2_nurse_data_v2.dta"
+file_w4nurse = "wave_4_nurse_data.dta"
+file_w6nurse = "wave_6_elsa_nurse_data_v2.dta"
+
+# Read the Nurse Visit data files and select relevant variables
+df_w2nurse <- read_dta(file = paste0(path, "/", file_w2nurse)) %>% 
+  select(idauniq, confage, sex, vismon, visyear, cfib, chol, hdl, trig, ldl, fglu, rtin, hscrp, hgb, hba1c,
+         mmstre, mmssre, mmftre2, mmlore, mmlsre, mmcrre, mmrrre, mmrroc, mmcrav, mmcrsc, mmcrna, mmrrsc, mmrrfti, mmrrtti, mmrrna) %>%
+  mutate(wave = 2)
+
+df_w4nurse <- read_dta(file = paste0(path, "/", file_w4nurse)) %>% 
+  select(idauniq, confage, dhsex,vismon, visyear, cfib, chol, hdl, trig, ldl, fglu, rtin, hscrp, hgb, hba1c, mmstre, mmssre, mmftre2, mmlore, mmlsre, mmcrre, mmrrre, mmrroc, mmcrav, mmcrsc, mmcrna, mmrrsc, mmrrfti, mmrrtti, mmrrna) %>%
+  mutate(wave = 4)
+
+df_w6nurse <- read_dta(file = paste0(path, "/", file_w6nurse)) %>% 
+  select(idauniq, indager, Sex, vismon, visyear,cfib,
+         chol, hdl, trig, ldl, fglu, rtin, hscrp, hgb, hba1c, mmstre, mmssre, 
+         MmFTRe, MMFTRE2, mmlore, mmlsre, mmcrre, mmrrre, MMRROC, mmcrav, mmcrsc, mmcrna, mmrrsc, mmrrfti, mmrrtti, mmrrna) %>%
+  mutate(wave = 6)
+```
+
+
+```{r}
+#making every variable names in wave 6 lowercase to be consistent with other waves
+df_w6nurse <- df_w6nurse %>% rename_with(tolower, everything())
+
+# Append the datasets
+combined_nurse <- bind_rows(df_w2nurse, df_w4nurse, df_w6nurse)
+
+#Harmonizing the age variable
+'wave 2 and 4 used confage, wave 6, 8, 8 and 9 used indager; 
+therefore a new variable age is created;
+in confage, age of respondent were recoded to 99 if aged 90 or over; however in indager, age of 90 or over were coded to -7'
+summary(combined_nurse$confage)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+# 37.0    58.0    65.0    66.3    73.0    99.0    8054 
+
+summary(combined_nurse$indager)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+# -7.00   60.00   66.00   65.63   74.00   89.00   16309 
+
+combined_nurse <- combined_nurse %>%
+  mutate(
+    # Replace indager values of -7 with 99 to be consistent with confage
+    indager = if_else(indager == -7, 99, indager),
+    # Create a unified 'age' column based on the waves
+    age = case_when(
+      wave %in% c(2, 4) ~ as.numeric(confage),   # Use 'confage' for waves 2 and 4
+      wave %in% c(6) ~ as.numeric(indager),  # Use 'indager' for waves 6, 8, and 8/9
+      TRUE ~ NA_real_                 # Assign NA for waves not covered if any
+    ),
+    
+    # Convert negative values to NA, ensuring no negative age values are retained
+    age = if_else(age < 0, NA_real_, age)
+  )
+
+# Remove old age columns
+combined_nurse <- combined_nurse %>%
+  select(-confage, -indager)
+
+# Checking and summarizing the new 'age' data
+summary(combined_nurse$age)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 31.00   59.00   65.00   66.66   73.00   99.00 
+
+
+#Harmonizing sex
+#wave 2 used sex, wave 4 used dhsex, wave 6 used Sex, wave 8 and 9 used indsex
+table(combined_nurse$sex)
+# 1    2 
+# 7055 8665
+table(combined_nurse$dhsex)
+# 1    2 
+# 3883 4760
+
+combined_nurse <- combined_nurse %>%
+  mutate(
+    # Create a unified 'sex' column based on the wave
+    sex = case_when(
+      wave %in% c(2,6) ~ as.numeric(sex),      # Use 'sex' for wave 2 and 6
+      wave == 4 ~ as.numeric(dhsex),    # Use 'dhsex' for wave 4
+      TRUE ~ NA_real_  # Assign NA for any other cases if needed
+    ),
+    # Convert negative values to NA  
+    sex = if_else(sex < 0, NA_real_, sex)
+  )
+
+# Remove old sex columns
+combined_nurse <- combined_nurse %>%
+  select(-dhsex)
+
+# Checking and summarizing the new 'sex' data
+table(combined_nurse$sex)
+
+# 1     2 
+# 10938 13425
+#1 = male, 2 = female
+```
+
+chairstand
+```{r}
+#######################################################################################################################
+
+#Generating chair stand variable
+#Western & Malkowski article
+#whether suitable chair available: if mmcrav=2 no score assigned
+#whether respondent feels safe to attempt single chair rise: if mmcrsc=2 no assign 0 point, if mmcrsc=1 yes proceed
+#single chair rise: used arm mmcrre=2 assign 0, not completed mmcrre=3 assign 0, mmcrre=1 stood without arms proceed
+#for those who stood without arms mmcrre=1, if respondent feels safe to attempt multiple chair rises: if mmrrsc=2 assign 0, if mmrrsc=1 feels safe and proceed
+#for mmrrsc=1, mmrrre number of rises completed, ranging from 0-4, assign 0
+#for mmrrre>5,  dont know: mmrrfti=-8, no score assigned
+#chair rises not timed correctly:  mmrrfti=-3, no score assigned 
+#mmrrfti>60, assigned 0
+#mmrrfti:16.7-60 assign 1
+#mmrrfti: 13.70-16.69, assign 2
+#mmrrfti: 11.20-13.69, assign 3
+#mmrrfti less than or equal to 11.19, assign 4
+
+summary(combined_nurse$mmrrfti)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# -8.000   7.060   9.840   9.243  12.460  63.430 
+
+combined_nurse <- combined_nurse %>%
+  mutate(
+    chairstandC = case_when(
+      mmcrav == 2 ~ NA_integer_,  # No suitable chair
+      mmcrav == 1 & mmcrsc == 2 ~ 0,  # Not safe to attempt
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 2 ~ 0,  # Used arms
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 3 ~ 0,  # Not completed
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 2 ~ 0,  # Not safe for multiple
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & between(mmrrre, 0, 4.9) ~ 0,  # Not enough rises
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & mmrrfti == -8 ~ NA_integer_,  # Unknown time
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & mmrrfti == -3 ~ NA_integer_,  # Not timed correctly
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & mmrrfti > 60 ~ 0,
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & between(mmrrfti, 16.7, 60) ~ 1,
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & between(mmrrfti, 13.70, 16.69) ~ 2,
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & between(mmrrfti, 11.20, 13.69) ~ 3,
+      mmcrav == 1 & mmcrsc == 1 & mmcrre == 1 & mmrrsc == 1 & between(mmrrfti, 0, 11.19) ~ 4,
+      TRUE ~ NA_integer_  # Default case
+    )
+  )
+table(combined_nurse$chairstandC)
+# 0     1     2     3     4 
+# 2841  1767  2491  4453 11456 
+table(combined_nurse$chairstandC, combined_nurse$wave)
+
+#     2    4    6
+# 0  916 1010  915
+# 1  639  601  527
+# 2  880  859  752
+# 3 1491 1607 1355
+# 4 3356 4070 4030   
+
+# Calculate overall statistics
+chairstandc_overall_stats <- combined_nurse %>%
+  summarise(
+    N = sum(!is.na(chairstandC)),
+    Mean = mean(chairstandC, na.rm = TRUE),
+    SD = sd(chairstandC, na.rm = TRUE)
+  )
+
+# Calculate statistics by wave
+chairstandc_wave_stats <- combined_nurse %>%
+  group_by(wave) %>%
+  summarise(
+    N = sum(!is.na(chairstandC)),
+    Mean = mean(chairstandC, na.rm = TRUE),
+    SD = sd(chairstandC, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Print results
+print(chairstandc_overall_stats)
+# N  Mean    SD
+# 23008  2.87  1.42
+print(chairstandc_wave_stats)
+# wave     N  Mean    SD
+# 2  7282  2.79  1.42
+# 4  8147  2.87  1.41
+# 6  7579  2.93  1.41
+
+```
+
+Harmonizing the blood biomarker variables
+```{r}
+#######################################################################################################################
+
+
+## Harmonizing the blood biomarker variables
+summary(combined_nurse)
+#define the list of blood biomarkers
+bloodbm_list <- c("cfib", "chol", "hdl", "trig", "ldl", "fglu", 
+             "rtin", "hscrp", "hgb", "hba1c")
+
+
+# Recode negative values to NA for specified blood biomarker variables
+combined_nurse <- combined_nurse %>%
+  mutate(across(all_of(bloodbm_list), ~ ifelse(. < 0, NA_real_, .)))
+
+
+#check summary statistics for biomarkers
+summary(combined_nurse)
+bloodbiomarker_stats <- combined_nurse %>%
+  group_by(wave) %>%
+  summarise(across(all_of(bloodbm_list),
+                   list(N = ~sum(!is.na(.)),
+                        Mean = ~mean(., na.rm = TRUE),
+                        SD = ~sd(., na.rm = TRUE),
+                        Min = ~min(., na.rm = TRUE),
+                        Max = ~max(., na.rm = TRUE)),
+                   .names = "{col}_{fn}"))
+
+#Unit conversion
+#hba1c: waves 2, 4 used %; wave 6 used mmol/mol; wave 8, 8/9 indicated % but the value seemed like mmol/mol; converting hba1c % (waves 2, 4) to mmol/mol; fomula: mmol/mol = 10,93 %hba1c – 23,5 mmol/mol
+combined_nurse <- combined_nurse %>%
+  mutate(
+    hba1c = if_else(
+      wave %in% c(2, 4),  # if wave 2 or 4
+      (hba1c * 10.93) - 23.5,  #if true convert % to mmol/mol
+      hba1c  # if false Keep hba1c as is
+    )
+  )
+#change the label of hba1c after unit conversion 
+current_label <- attr(combined_nurse$hba1c, "label")
+attr(combined_nurse$hba1c, "label") <- "Blood glycated haemoglobin level (mmol/mol)"
+
+#check if the units are converted correctly
+summary_biomarker_stats <- combined_nurse %>%
+  group_by(wave) %>%
+  summarise(across(all_of(bloodbm_list),
+                   list(N = ~sum(!is.na(.)),
+                        Mean = ~mean(., na.rm = TRUE),
+                        SD = ~sd(., na.rm = TRUE),
+                        Min = ~min(., na.rm = TRUE),
+                        Max = ~max(., na.rm = TRUE)),
+                   .names = "{col}_{fn}"))
+
+
+
+#log transfer skewed variables as ln(1+x)
+combined_nurse$log_trig = log(combined_nurse$trig + 1)
+combined_nurse$log_fglu = log(combined_nurse$fglu + 1)
+combined_nurse$log_rtin = log(combined_nurse$rtin + 1)
+
+#log transfer CRP as ln(x)
+combined_nurse$log_hscrp = log(combined_nurse$hscrp)
+
+#define the list of blood biomarkers after log transformation from the nurse dataset
+blood_biomarker_list <- c("cfib", "chol", "hdl", "log_trig", "ldl", "log_fglu", "log_rtin", "log_hscrp", "hgb", "hba1c" )
+
+#saving the combined_nurse dataset, which contains laboratory blood biomarkers from the nurse visit data files
+write_dta(combined_nurse, "~/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/YifanShi/Data/ELSA/nurse_visit_10 sept.dta")
+
+
+```
+
+
+```{r}
+##############################################################################################
+#merge the blood biomarkers from the nurse visit data files with other physical measures and performance tests from the 5050 harmonized dataset, by idauniq and wave
+
+# Prepare for merge
+# Check data types for combined_nurse
+str(combined_nurse[c("idauniq", "wave")])
+
+# Check data types for physical_measure_long
+str(physical_measure_long[c("idauniq", "wave")])
+
+# Convert idauniq in combined_nurse and physical_measure_long to plain numeric 
+combined_nurse$idauniq <- as.numeric(as.character(combined_nurse$idauniq))
+physical_measure_long$idauniq <- as.numeric(physical_measure_long$idauniq)
+
+# Ensure wave is also numeric in both datasets, which it already is but double-checking
+combined_nurse$wave <- as.numeric(combined_nurse$wave)
+physical_measure_long$wave <- as.numeric(physical_measure_long$wave)
+
+# Check structures again
+str(combined_nurse[c("idauniq", "wave")])
+str(physical_measure_long[c("idauniq", "wave")])
+
+# Now perform the full join
+biomarkers <- full_join(combined_nurse, physical_measure_long, by = c("idauniq", "wave"))
+
+
+print(dim(biomarkers))
+summary(biomarkers)
+print(names(biomarkers))
+```
+
+```{r}
+#Generate a new variable fevfvc = fev / fvc
+biomarkers <- biomarkers %>%
+  mutate(fevfvc = fev / fvc)
+```
+
+
+```{r}
+# Convert birth year and visit year/month to date formats
+biomarkers$birth_date <- as.Date(paste(biomarkers$byear, "1", "1", sep="-"))  # Assuming January 1 as the birth date
+biomarkers$visit_date <- as.Date(paste(biomarkers$visyear, biomarkers$vismon, "1", sep="-"))  # Assuming the first of the month
+
+# Calculate exact age at visit in years including decimals
+biomarkers$age_at_visit <- as.numeric(difftime(biomarkers$visit_date, biomarkers$birth_date, units = "days")) / 365.25
+
+
+age <- select(biomarkers, idauniq, vismon, visyear, visit_date, byear, birth_date, age, agey,age_at_visit )
+#define the list of biomarkers after merging
+biomarker_list <- c("cfib", "chol", "hdl", "log_trig", "ldl", "log_fglu", "log_rtin", "log_hscrp", "hgb", "hba1c",
+                    "systo", "diasto", "pulse",  "gripsum", "mheight", "mweight", "mbmi", "mwaist", "fvc", "fev", "fevfvc",
+                    "balance_e", "legraise", "tandemleg", "chairstandA", "chairstandB", "chairstandC", "log_min_wspeed")
+
+```
+
+
+```{r}
+#to remove outliers outside of 5sd, grouped by gender
+biomarkers <- biomarkers %>%
+  group_by(gender)%>%
+  mutate(across(all_of(biomarker_list), ~if_else(
+    . > mean(., na.rm = TRUE) + 5 * sd(., na.rm = TRUE) |
+      . < mean(., na.rm = TRUE) - 5 * sd(., na.rm = TRUE),
+    NA_real_,
+    .
+  ))) %>%
+  ungroup()
+```
+
+
+```{r}
+#######################################################################################################################
+#Period effect correction
+# Fit a regression of each biomarker on a series of dummy variables coding wave of measurement + terms for age, age^2, sex, age*sex, and age^2*sex. Then, use the coefficients estimated for the waves to "correct" biomarker values at that wave to match the reference wave (W2)
+# 
+# The mixed-effects model to adjust for period effect is: 
+#   
+# `biomarker ~ factor(wave) + age + I(age^2) + factor(sex) + age:factor(sex) + I(age^2):factor(sex) + (1 | idauniq)`
+# 
+# 
+# biomarker_model = lmerTest::lmer(biomarker ~ factor(wave) + age + I(age^2) + factor(sex) + age:factor(sex) + I(age^2):factor(sex) + (1 | idauniq), data = combined_nurse)
+# biomarker_model = biomarker_model %>% broom.mixed::tidy()
+# 
+# combined_nurse = combined_nurse %>% 
+#   mutate(biomarker_c = case_when(wave == 2 ~ biomarker,
+#                                  wave == 4 ~ biomarker - biomarker_model$estimate[2],
+#                                  wave == 6 ~ biomarker - biomarker_model$estimate[3],
+#                               
+
+
+# Function to fit model and adjust values
+adjust_biomarker <- function(biomarker, data) {
+  # Fit the model
+  model <- lmer(paste0(biomarker, " ~ factor(wave) + agey + I(agey^2) + factor(gender) + agey:factor(gender) + I(agey^2):factor(gender) + (1 | idauniq)"), data = data)
+  model_tidy <- tidy(model)
+
+  # Adjust values based on wave
+  data %>%
+    mutate("{biomarker}_c" := case_when(
+      wave == 2 ~ .data[[biomarker]],
+      wave == 4 ~ .data[[biomarker]] - model_tidy$estimate[2],
+      wave == 6 ~ .data[[biomarker]] - model_tidy$estimate[3],
+    ))
+}
+
+# Apply the adjustment function to each biomarker
+adjusted_biomarkers <- biomarkers
+for (biomarker in biomarker_list) {
+  adjusted_biomarkers <- adjust_biomarker(biomarker, adjusted_biomarkers)
+}
+```
+
+
+```{r}
+biomarker_labels <- c(
+  cfib = "Blood Fibrinogen Level (g/l)",
+  chol = "Total Cholesterol (mmol/l)",
+  hdl = "HDL Cholesterol (mmol/l)",
+  log_trig = "log(Triglycerides)",
+  ldl = "LDL Cholesterol (mmol/l)",
+  log_fglu = "log(Fasting Glucose)",
+  log_rtin = "log(Blood Ferritin)",
+  log_hscrp = "log(C-Reactive Protein)",
+  hgb = "Hemoglobin (g/dl)",
+  hba1c = "HbA1c (mmol/mol)",
+  systo = "Mean Systolic BP (mmHg)",
+  diasto = "Mean Diastolic BP (mmHg)",
+  pulse = "Average Pulse Measure 2 & 3  ",
+  gripsum = "Dominant Hand Grip Strength (kg)",
+  mheight = "Height (m)",
+  mweight = "Weight (kg)",
+  mbmi = "Body Mass Index (kg/m2)",
+  mwaist = "Average Waist Measurement (cm)",
+  fev = "Maximum Lung Function Forced Vital Capacity",
+  fvc = "Maximum Lung Function Forced Expiratory Volume",
+  fevfvc = "FEV/FVC Ratio",
+  balance_e = "Balance Test Summary Score",
+  legraise = "Leg Raise Score",
+  tandemleg = "Combined Tandem Balance and Leg Raise Score ",
+  chairstandA = "Chair Stand Score A",
+  chairstandB = "Chair Stand Score B",
+  chairstandC = "Chair Stand Score C",
+  log_min_wspeed = "log(Walking Speed)"
+  )
+
+
+#define a new list of biomarkers after period effect correction
+adjusted_biomarker_list <- c("cfib_c", "chol_c", "hdl_c", "log_trig_c", "ldl_c", "log_fglu_c", "log_rtin_c", "log_hscrp_c", "hgb_c", "hba1c_c",
+                             "systo_c", "diasto_c", "pulse_c", "gripsum_c", "mheight_c", "mweight_c", "mbmi_c", "mwaist_c", "fvc_c", "fev_c", "fevfvc_c",
+                             "balance_e_c", "legraise_c", "tandemleg_c", "chairstandA_c", "chairstandB_c", "chairstandC_c", "log_min_wspeed_c")
+
+#define labels for adjusted biomarkers
+labels_c <- c(
+  cfib_c = "Blood Fibrinogen Level (g/l)",
+  chol_c = "Total Cholesterol (mmol/l)",
+  hdl_c = "HDL Cholesterol (mmol/l)",
+  log_trig_c = "log(Triglycerides)",
+  ldl_c = "LDL Cholesterol (mmol/l)",
+  log_fglu_c = "log(Fasting Glucose)",
+  log_rtin_c = "log(Blood Ferritin)",
+  log_hscrp_c = "log(C-Reactive Protein)",
+  hgb_c = "Hemoglobin (g/dl)",
+  hba1c_c = "HbA1c (mmol/mol)",
+  systo_c = "Mean Systolic BP (mmHg)",
+  diasto_c = "Mean Diastolic BP (mmHg)",
+  pulse_c = "Average Pulse Measure 2 & 3",
+  gripsum_c = "Dominant Hand Grip Strength (kg)",
+  mheight_c = "Height (m)",
+  mweight_c = "Weight (kg)",
+  mbmi_c = "Body Mass Index (kg/m2)",
+  mwaist_c = "Average Waist Measurement (cm)",
+  fvc_c = "Maximum Lung Function Forced Vital Capacity",
+  fev_c = "Maximum Lung Function Forced Expiratory Volume",
+  fevfvc_c = "FEV/FVC Ratio",
+  balance_e_c = "Balance Test Summary Score",
+  legraise_c = "Leg Raise Score",
+  tandemleg_c = "Combined Tandem Balance and Leg Raise Score",
+  chairstandA_c = "Chair Stand Score A",
+  chairstandB_c = "Chair Stand Score B",
+  chairstandC_c = "Chair Stand Score C",
+  log_min_wspeed_c = "log(Walking Speed)"
+)
+```
+
+
+```{r}
+#######################################################################################################################
+#Scatter Plots with LOESS Comparison side-by-side
+# Start the PDF output to save the plots
+pdf("Combined_Scatter_Plots_2025.pdf", width = 16, height = 11)  # Width to accommodate two plots side by side
+base_size <- 14  # Define base size for text elements
+
+# Ensure sex is factored correctly
+#adjusted_biomarkers$gender<- factor(adjusted_biomarkers$gender, levels = c(1, 2), labels = c("Male", "Female"))
+
+# Loop through each biomarker
+for (x in biomarker_list) {
+  label <- biomarker_labels[x]  # Retrieve the label for the title
+  
+  # Original Data Plot
+  p1 <- ggplot(adjusted_biomarkers, aes(x = agey, y = .data[[x]])) +
+    geom_point(aes(fill = gender), shape = 21, alpha = 0.6) +  # Use fill for points
+    geom_smooth(data = subset(adjusted_biomarkers, agey < 90),  # Exclude age 90 for smoothing
+                method = "loess", span = 0.3, se = FALSE, aes(color = gender)) +  # Color only for lines
+    scale_fill_manual(values = c("Male" = "lightblue", "Female" = "pink")) +  # Colors for point fills
+    scale_color_manual(values = c("Male" = "darkblue", "Female" = "red")) +  # Colors for lines
+    labs(
+      title = paste("Original: ", label, "with LOESS Smoothing by Sex"),
+      x = "Age",
+      y = label
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, vjust = 0.5),
+      legend.title = element_text(size = base_size),
+      legend.text = element_text(size = base_size * 0.8),
+      legend.position = "bottom"
+    )
+  
+  # Corrected Data Plot
+  x_corrected <- paste0(x, "_c")
+  label_corrected <- labels_c[x_corrected]
+  
+  p2 <- ggplot(adjusted_biomarkers, aes(x = agey, y = .data[[x_corrected]])) +
+    geom_point(aes(fill = gender), shape = 21, alpha = 0.6) +  # Use fill for points
+    geom_smooth(data = subset(adjusted_biomarkers, agey < 90),  # Exclude age 90 for smoothing
+                method = "loess", span = 0.3, se = FALSE, aes(color = gender)) +  # Color only for lines
+    scale_fill_manual(values = c("Male" = "lightblue", "Female" = "pink")) +  # Colors for point fills
+    scale_color_manual(values = c("Male" = "darkblue", "Female" = "red")) +  # Colors for lines
+    labs(
+      title = paste("Corrected: ", label_corrected, "with LOESS Smoothing by Sex"),
+      x = "Age",
+      y = label_corrected
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, vjust = 0.5),
+      legend.title = element_text(size = base_size),
+      legend.text = element_text(size = base_size * 0.8),
+      legend.position = "bottom"
+    )
+  
+  # Combine plots side-by-side
+  grid.arrange(p1, p2, ncol = 2)
+}
+
+# Close the PDF device
+dev.off()
+
+
+# Start the PDF output to save the plots
+pdf("Scatter Plot with LOWESS Smoothing by Sex_Corrected_2025.pdf", width = 8, height = 11)
+base_size <- 14  # Define base size for text elements
+
+# Loop through each biomarker and create a plot
+for (biomarkers in adjusted_biomarker_list) {
+  label <- labels_c[biomarkers]  # Retrieve the label for the title
+  
+  # Create the plot
+  p <- ggplot(adjusted_biomarkers, aes(x = agey, y = .data[[biomarkers]])) +
+    geom_point(aes(fill = gender), shape = 21, alpha = 0.6) +  # Use fill for points
+    geom_smooth(data = subset(adjusted_biomarkers, agey < 90),  # Exclude age 90 for smoothing
+                method = "loess", span = 0.3, se = FALSE, aes(color = gender)) +  # Color only for lines
+    scale_fill_manual(values = c("Male" = "lightblue", "Female" = "pink")) +  # Colors for point fills
+    scale_color_manual(values = c("Male" = "darkblue", "Female" = "red")) +  # Colors for lines
+    labs(
+      title = paste("Scatter Plot of", label, "with LOESS Smoothing by Sex"),
+      x = "Age",
+      y = paste("Value of", label)
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size, hjust = 0.5),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, vjust = 0.5, size = base_size*0.8),
+      legend.title = element_text(size = base_size),
+      legend.text = element_text(size = base_size * 0.8),
+      legend.position = "bottom"
+    )
+  
+  print(p)  # Print the plot
+}
+
+# Close the PDF device
+dev.off()
+
+
+#density plot for each biomarker across waves
+pdf("Density_Plots_Corrected_1 Sept.pdf", width = 8, height = 11)
+base_size <- 14 
+
+for (x in adjusted_biomarker_list) {
+  label <- labels_c[x] 
+  
+  
+  # Generate the density plot
+  p <- ggplot(adjusted_biomarkers %>% filter(wave %in% c(2, 4, 6)), aes(x = .data[[x]], fill = factor(wave))) +
+    geom_density(alpha = 0.5) +
+    facet_wrap(~ wave, scales = "free_y", ncol = 1) +  
+    labs(
+      title = paste("Density Distribution of", label, "by Wave"),
+      x = label,  
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size * 1.2, hjust = 0.5),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = base_size * 0.8),
+      caption = element_text(size = base_size * 0.8),
+      legend.position = "bottom"
+    ) +
+    scale_fill_brewer(palette = "Pastel1")  
+  
+  print(p)
+}
+
+dev.off()
+
+install.packages("ggridges")
+library(ggridges)
+# Start the PDF output to save the plots
+pdf("Density_Ridge_Plots_Corrected_1_Sept.pdf", width = 8, height = 11)
+base_size <- 14 
+
+for (x in adjusted_biomarker_list) {
+  label <- labels_c[x] 
+  
+  # Generate the ridge plot
+  p <- ggplot(adjusted_biomarkers %>% filter(wave %in% c(2, 4, 6)), aes(x = .data[[x]], y = factor(wave), fill = factor(wave))) +
+    geom_density_ridges(alpha = 0.8, scale = 1.2) +
+    labs(
+      title = paste("Density Distribution of", label, "by Wave"),
+      x = label,  
+      y = "Wave"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size * 1.2, hjust = 0.5),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = base_size * 0.8),
+      caption = element_text(size = base_size * 0.8),
+      legend.position = "none"
+    ) +
+    scale_fill_brewer(palette = "Pastel1")  
+  
+  print(p)
+}
+
+# Close the PDF device
+dev.off()
+
+
+#box plot 
+path_to_save <- "/Users/syf/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/YifanShi/Figures/Biomarkers_Box_Plots_Corrected_1_Sept.pdf"
+
+pdf(path_to_save, width = 8, height = 11)
+base_size <- 14 
+
+for (x in adjusted_biomarker_list) {
+  label <- labels_c[x] 
+  
+  p <- ggplot(adjusted_biomarkers %>% filter(wave %in% c(2, 4, 6)), 
+              aes(x = factor(wave), y = .data[[x]])) +
+    geom_boxplot() +
+    labs(
+      title = paste("Distribution of", label, "by Wave"),
+      x = "Wave",
+      y = label
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size, hjust = 0.5),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, vjust = 0.5, size = base_size * 0.8),
+      caption = element_text(size = base_size * 0.8)
+    )
+  
+  print(p)
+}
+
+dev.off()
+
+#Histogram
+pdf("Biomarkers_Histograms_Corrected_1_Sept.pdf", width = 8, height = 11)
+base_size <- 14
+
+for (x in adjusted_biomarker_list) {
+  label <- labels_c[x]
+  
+  p <- ggplot(adjusted_biomarkers %>% filter(wave %in% c(2, 4, 6)),
+              aes(x = .data[[x]])) +
+    geom_histogram(binwidth = 1) +
+    labs(
+      title = paste("Histogram of", label, "by Wave"),
+      x = label,
+      y = "Frequency"
+    ) +
+    facet_wrap(~wave, scales = "free_y") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = base_size, hjust = 0.5),
+      axis.title = element_text(size = base_size),
+      axis.text = element_text(size = base_size * 0.8),
+      axis.text.x = element_text(angle = 45, vjust = 0.5, size = base_size * 0.8),
+      caption = element_text(size = base_size * 0.8)
+    )
+  
+  print(p)
+}
+
+dev.off()
+
+
+# Calculate summary statistics
+summary_results_original <- lapply(biomarker_list, function(biomarker) {
+  adjusted_biomarkers %>%
+    group_by(wave) %>%
+    summarise(
+      Biomarker = biomarker_labels[biomarker],  # Using labels for clarity in the output
+      N = sum(!is.na(.data[[biomarker]])),
+      Mean = mean(.data[[biomarker]], na.rm = TRUE),
+      SD = sd(.data[[biomarker]], na.rm = TRUE),
+      Min = min(.data[[biomarker]], na.rm = TRUE),
+      Max = max(.data[[biomarker]], na.rm = TRUE),
+      .groups = 'drop'
+    )
+}) %>%
+  bind_rows()  
+write.xlsx(summary_results_original, "Biomarker_Summary_Table_nocorrection_1sept.xlsx")
+
+summary_results_corrected <- lapply(adjusted_biomarker_list, function(biomarker) {
+  adjusted_biomarkers %>%
+    group_by(wave) %>%
+    summarise(
+      Biomarker = labels_c[biomarker],  # Using labels for clarity in the output
+      N = sum(!is.na(.data[[biomarker]])),
+      Mean = mean(.data[[biomarker]], na.rm = TRUE),
+      SD = sd(.data[[biomarker]], na.rm = TRUE),
+      Min = min(.data[[biomarker]], na.rm = TRUE),
+      Max = max(.data[[biomarker]], na.rm = TRUE),
+      .groups = 'drop'
+    )
+}) %>%
+  bind_rows()  
+write.xlsx(summary_results_corrected, "Biomarker_Summary_Table_corrected_1sept.xlsx")
+
+
+
+#demographics
+adjusted_biomarkers %>% 
+  group_by(wave) %>%
+  furniture::table1("Age" = agey, "Sex" = gender, caption = "Demographic characteristics", 
+                    output = 'text', float = "h", booktabs = T, na.rm = F, digits = 2) 
+
+```
+
+```{r}
+write_dta(adjusted_biomarkers, "~/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/YifanShi/Data/ELSA/biomarker_dataset_2025.dta")
+```
+
+## PART 3: Outcome Data
+
+Outcome data
+```{r}
+# Set the path to the data files
+path ="/Users/syf/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/Data/UKDA-5050/UKDA-5050-stata/stata/stata13_se"
+
+# Define file paths
+file_outcome = "h_elsa_g3.dta"
+
+#Read the dataset
+df_h_elsa_g3 <- read_dta(file = paste0(path, "/", file_outcome))
+
+variables_outcome <- c(
+  "idauniq",
+  "ragender",
+  "r1agey", "r2agey", "r3agey","r4agey", "r5agey", "r6agey", "r7agey", "r8agey", "r9agey",# R age (years) at interview
+  "radyear", #death year
+  "r1hibpe", "r2hibpe", "r3hibpe", "r4hibpe", "r5hibpe", "r6hibpe", "r7hibpe", "r8hibpe", "r9hibpe", #ever had high blood pressure
+  "r1diabe", "r2diabe", "r3diabe", "r4diabe", "r5diabe", "r6diabe", "r7diabe", "r8diabe", "r9diabe", #ever had diabetes
+  "r1cancre", "r2cancre", "r3cancre", "r4cancre", "r5cancre", "r6cancre", "r7cancre", "r8cancre", "r9cancre", #ever had cancer
+  "r1lunge", "r2lunge", "r3lunge", "r4lunge", "r5lunge", "r6lunge", "r7lunge", "r8lunge", "r9lunge", #ever had lung disease
+  "r1hearte", "r2hearte", "r3hearte", "r4hearte", "r5hearte", "r6hearte", "r7hearte", "r8hearte", "r9hearte", #ever had heart problem
+  "r1stroke", "r2stroke", "r3stroke", "r4stroke", "r5stroke", "r6stroke", "r7stroke", "r8stroke", "r9stroke", #ever had stroke
+  "r1psyche", "r2psyche", "r3psyche", "r4psyche", "r5psyche", "r6psyche", "r7psyche", "r8psyche", "r9psyche", #ever had psych probelm
+  "r1arthre", "r2arthre", "r3arthre", "r4arthre", "r5arthre", "r6arthre", "r7arthre", "r8arthre", "r9arthre", #ever had arthritis
+  "r1asthmae", "r2asthmae", "r3asthmae", "r4asthmae", "r5asthmae", "r6asthmae", "r7asthmae", "r8asthmae", "r9asthmae", #ever had asthma
+  "r2hchole", "r3hchole", "r4hchole", "r5hchole", "r6hchole", "r7hchole", "r8hchole", "r9hchole", #ever had high cholesterol
+  "r1catracte", "r2catracte", "r3catracte", "r4catracte", "r5catracte", "r6catracte", "r7catracte", "r8catracte", "r9catracte", #ever had cataracts
+  "r1parkine", "r2parkine", "r3parkine", "r4parkine", "r5parkine", "r6parkine", "r7parkine", "r8parkine", "r9parkine", #ever had parkinson disease
+  "r1hipe", "r2hipe", "r3hipe", "r4hipe", "r5hipe", "r6hipe", "r7hipe", "r8hipe", "r9hipe", #ever had hip fracture
+  "r1angine", "r2angine", "r3angine", "r4angine", "r5angine", "r6angine", "r7angine", "r8angine", "r9angine", #ever had angina
+  "r1hrtatte", "r2hrtatte", "r3hrtatte", "r4hrtatte", "r5hrtatte", "r6hrtatte", "r7hrtatte", "r8hrtatte", "r9hrtatte", #ever had heart attack
+  "r1conhrtfe", "r2conhrtfe", "r3conhrtfe", "r4conhrtfe", "r5conhrtfe", "r6conhrtfe", "r7conhrtfe", "r8conhrtfe", "r9conhrtfe", #ever had congestive heart failure
+  "r1hrtmre", "r2hrtmre", "r3hrtmre", "r4hrtmre", "r5hrtmre", "r6hrtmre", "r7hrtmre", "r8hrtmre", "r9hrtmre", #ever had heart murmur
+  "r1hrtrhme", "r2hrtrhme", "r3hrtrhme", "r4hrtrhme", "r5hrtrhme", "r6hrtrhme", "r7hrtrhme", "r8hrtrhme", "r9hrtrhme", #ever had abnormal heart rhythm
+  "r1osteoe", "r2osteoe", "r3osteoe", "r4osteoe", "r5osteoe", "r6osteoe", "r7osteoe", "r8osteoe", "r9osteoe", #ever had osteoporosis
+  "r1alzhe", "r2alzhe", "r3alzhe", "r4alzhe", "r5alzhe", "r6alzhe", "r7alzhe", "r8alzhe", "r9alzhe", #ever had alzheimer's
+  "r1demene", "r2demene", "r3demene", "r4demene", "r5demene", "r6demene", "r7demene", "r8demene", "r9demene", #ever had dementia
+  "r1memrye", "r2memrye", "r3memrye", "r4memrye", "r5memrye", "r6memrye", "r7memrye", "r8memrye", "r9memrye", #ever had memory problem
+  
+  "radiagangin", #age first diagnosed with angina
+  "rafrhrtatt", #age first diagnosed with heart attack
+  "radiagchf", #age first diagnosed with congestive heart failure
+  "radiagdiab", #age first diagnosed with diabetes
+  "radiagstrok",  #age first diagnosed with stroke
+  "radiagarthr", #age first diagnosed with arthritis
+  "radiagcancr", #age first diagnosed with cancer
+  "radiagparkin", #age first diagnosed with Parkinson's
+  "radiagpsych", #age first diagnosed with psychiatric problems 
+  "radiagalzh", #age first diagnosed with alzheimer's
+  "radiagdemen", #age first diagnosed with dementia
+  
+  "r1adlwa", "r2adlwa", "r3adlwa", "r4adlwa", "r5adlwa", "r6adlwa", "r7adlwa", "r8adlwa", "r9adlwa", #Some Diff-ADLs:Wallace /0-3 
+  "r1adla", "r2adla", "r3adla", "r4adla", "r5adla", "r6adla", "r7adla", "r8adla", "r9adla", #Some Diff-ADLs:5-Item /0-5
+  "r1adlfive", "r2adlfive", "r3adlfive", "r4adlfive", "r5adlfive", "r6adlfive", "r7adlfive", "r8adlfive", "r9adlfive", #Some Diff-ADLS:5-Item alt /0-5
+  "r1adltot6", "r2adltot6", "r3adltot6", "r4adltot6", "r5adltot6", "r6adltot6", "r7adltot6", "r8adltot6",
+"r9adltot6", #Some Diff-ADLS:6-Item /0-6
+  "r1iadla", "r2iadla", "r3iadla", "r4iadla", "r5iadla", "r6iadla", "r7iadla", "r8iadla", "r9iadla", #Some Diff-IADLs:3-Item /0-3   
+  "r1iadlfour", "r2iadlfour", "r3iadlfour", "r4iadlfour", "r5iadlfour", "r6iadlfour", "r7iadlfour", "r8iadlfour", "r9iadlfour", #Some Diff-IADLs:4-item /0-4
+  "r1iadlza", "r2iadlza", "r3iadlza", "r4iadlza", "r5iadlza", "r6iadlza", "r7iadlza", "r8iadlza", "r9iadlza", #Some Diff-IADLs:5-item /0-5
+  "r1iadltot1_e", "r2iadltot1_e", "r3iadltot1_e", "r4iadltot1_e", "r5iadltot1_e", "r6iadltot1_e", "r7iadltot1_e", "r8iadltot1_e", "r9iadltot1_e", #Some Diff-IADLs:7-item /0-7
+"r4iadltot2_e", "r5iadltot2_e", "r6iadltot2_e", "r7iadltot2_e", "r8iadltot2_e", "r9iadltot2_e", #Some Diff-IADLs:9-item /0-9
+  "r1slfmem", "r2slfmem", "r3slfmem", "r4slfmem", "r7slfmem", "r8slfmem", "r9slfmem", # Self-reported memory
+  "r1imrc", "r2imrc", "r3imrc", "r4imrc", "r5imrc", "r6imrc", "r7imrc", "r8imrc", "r9imrc", # Immediate word recall
+  "r1dlrc", "r2dlrc", "r3dlrc", "r4dlrc", "r5dlrc", "r6dlrc", "r7dlrc", "r8dlrc", "r9dlrc", # Delayed word recall
+  "r1tr20", "r2tr20", "r3tr20", "r4tr20", "r5tr20", "r6tr20", "r7tr20", "r8tr20", "r9tr20", # Recall summary score
+  "r1orient", "r2orient", "r3orient", "r4orient", "r5orient", "r6orient", "r7orient", "r8orient", "r9orient", # Cognition orientation (summary date naming)
+  "r1verbf", "r2verbf", "r3verbf", "r4verbf", "r5verbf", "r7verbf", "r8verbf", "r9verbf", # Verbal fluency score
+  "r1numer_e", "r4numer_e", "r6numer_e", "r7numer_e", "r8numer_e", "r9numer_e", # Numeracy score
+  "r1prmt1", "r2prmt1", "r3prmt1", "r4prmt1", "r5prmt1", # Prospective memory task 1
+  "r7bwc20", "r8bwc20", "r9bwc20", # Backwards Counting From 20
+  "r7ser7", "r8ser7", "r9ser7", # Serial 7s task
+  "r7scis", "r8scis", "r9scis", "r7cact", "r8cact", "r9cact", # Object naming (scissors, cactus)
+  "r7mnrc", "r8mnrc", "r9mnrc", "r7pm", "r8pm", "r9pm", "r7pres", "r8pres", "r9pres" # Current leaders (Monarch, Prime Minister, US President)
+)
+
+
+df_outcome <- df_h_elsa_g3 %>%
+  select(all_of(variables_outcome))
+```
+
+pivot longer
+```{r}
+# Pivot the datafile from wide to long, based on the naming convention of the variables. 
+outcome_long <- df_outcome %>%
+  pivot_longer(
+    cols = -c(idauniq, ragender, radyear, radiagangin, rafrhrtatt, radiagchf, radiagdiab,
+              radiagstrok, radiagarthr, radiagcancr, radiagparkin, radiagpsych, radiagalzh, radiagdemen), # Exclude these columns
+    names_to = c("wave", ".value"), # Split the column names into 'wave' and the measurement variable names
+    names_pattern = "r(\\d+)(.+)", # extract the wave number and the variable name
+    values_to = "value" # Name of the new column for the values
+  ) %>%
+  mutate(wave = as.numeric(wave)) # Convert wave from character to numeric
+
+# Reordering columns to put 'wave' next to 'idauniq'
+outcome_long <- outcome_long %>%
+  relocate(wave, .after = idauniq)%>%
+  relocate(agey, .after = wave)
+```
+
+
+```{r}
+outcome_labels <- c(
+  idauniq = "Unique Identifier",
+  ragender = "Gender",
+  radyear = "Death Year",
+  agey = "Age at Interview",
+  radiagangin = "Age first diagnosed with angina",
+  rafrhrtatt = "Age first diagnosed with heart attack",
+  radiagchf = "Age first diagnosed with congestive heart failure",
+  radiagdiab = "Age first diagnosed with diabetes",
+  radiagstrok = "Age first diagnosed with stroke",
+  radiagarthr = "Age first diagnosed with arthritis",
+  radiagcancr = "Age first diagnosed with cancer",
+  radiagparkin = "Age first diagnosed with Parkinson's",
+  radiagpsych = "Age first diagnosed with psychiatric problems",
+  radiagalzh = "Age first diagnosed with Alzheimer's",
+  radiagdemen = "Age first diagnosed with dementia",
+  hibpe = "Ever had high blood pressure",
+  diabe = "Ever had diabetes",
+  cancre = "Ever had cancer",
+  lunge = "Ever had lung disease",
+  hearte = "Ever had heart problem",
+  stroke = "Ever had stroke",
+  psyche = "Ever had psych problem",
+  arthre = "Ever had arthritis",
+  asthmae = "Ever had asthma",
+  hchole = "Ever had high cholesterol",
+  catracte = "Ever had cataracts",
+  parkine = "Ever had Parkinson's disease",
+  hipe = "Ever had hip fracture",
+  angine = "Ever had angina",
+  hrtatte = "Ever had heart attack",
+  conhrtfe = "Ever had congestive heart failure",
+  hrtmre = "Ever had heart murmur",
+  hrtrhme = "Ever had abnormal heart rhythm",
+  osteoe = "Ever had osteoporosis",
+  alzhe = "Ever had Alzheimer's",
+  demene = "Ever had dementia",
+  memrye = "Ever had memory problem",
+  adlwa = "Some Diff-ADLs: Wallace /0-3",
+  adla = "Some Diff-ADLs: 5-Item /0-5",
+  adlfive = "Some Diff-ADLS: 5-Item alt /0-5",
+  adltot6 = "Some Diff-ADLS: 6-Item /0-6",
+  iadla = "Some Diff-IADLs: 3-Item /0-3",
+  iadlfour = "Some Diff-IADLs: 4-item /0-4",
+  iadlza = "Some Diff-IADLs: 5-item /0-5",
+  iadltot1_e = "Some Diff-IADLs: 7-item /0-7",
+  iadltot2_e = "Some Diff-IADLs: 9-item /0-9",
+  slfmem = "Self-reported memory",
+  imrc = "Immediate word recall",
+  dlrc = "Delayed word recall",
+  tr20 = "Recall summary score",
+  orient = "Cognition orientation (summary date naming)",
+  verbf = "Verbal fluency score",
+  numer_e = "Numeracy score",
+  prmt1 = "Prospective memory task 1",
+  bwc20 = "Backwards Counting From 20",
+  ser7 = "Serial 7s task",
+  scis = "Object naming: scissors",
+  cact = "Object naming: cactus",
+  mnrc = "Name the Current monarch",
+  pm = "Name the Current prime minister",
+  pres = "Name the Current US president"
+
+)
+
+```
+
+
+```{r}
+#saving the physical_measure_long data
+write_dta(outcome_long, "~/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/ELSA/YifanShi/Data/ELSA/Outcome_5050_7 sept.dta")
+
+```
+
